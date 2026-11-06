@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models.dart';
 import '../services/app_state.dart';
+import '../services/youtube_service.dart';
 import '../widgets/common.dart';
 import 'feed_detail_screen.dart';
 
@@ -31,8 +32,14 @@ class FeedsScreen extends StatelessWidget {
                 return ListTile(
                   leading: Cover(url: feed.imageUrl),
                   title: Text(feed.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: Text(feed.description ?? feed.url,
-                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(
+                      [
+                        if (feed.isYouTube)
+                          feed.audioOnly ? 'YouTube · alleen audio' : 'YouTube',
+                        feed.description ?? (feed.isYouTube ? '' : feed.url),
+                      ].where((s) => s.isNotEmpty).join('\n'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(
                       builder: (_) => FeedDetailScreen(feed: feed))),
                   trailing: IconButton(
@@ -82,7 +89,7 @@ class _EmptyFeeds extends StatelessWidget {
             Text('Nog geen feeds', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             const Text(
-              'Voeg een RSS-feed van een podcast of videokanaal toe met de knop hieronder.',
+              'Voeg een podcastfeed of YouTube-kanaal toe met de knop hieronder.',
               textAlign: TextAlign.center,
             ),
           ],
@@ -102,7 +109,16 @@ class _AddFeedDialog extends StatefulWidget {
 class _AddFeedDialogState extends State<_AddFeedDialog> {
   final _controller = TextEditingController();
   bool _busy = false;
+  bool _audioOnly = true;
   String? _error;
+
+  bool get _isYouTube => YouTubeService.looksLikeYouTube(_controller.text);
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(() => setState(() {}));
+  }
 
   @override
   void dispose() {
@@ -117,7 +133,8 @@ class _AddFeedDialogState extends State<_AddFeedDialog> {
       _error = null;
     });
     try {
-      await AppScope.read(context).addFeed(_controller.text);
+      await AppScope.read(context)
+          .addFeed(_controller.text, audioOnly: _isYouTube && _audioOnly);
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       setState(() {
@@ -131,18 +148,34 @@ class _AddFeedDialogState extends State<_AddFeedDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Feed toevoegen'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        enabled: !_busy,
-        keyboardType: TextInputType.url,
-        decoration: InputDecoration(
-          labelText: 'RSS-adres',
-          hintText: 'https://voorbeeld.nl/podcast.xml',
-          errorText: _error,
-          errorMaxLines: 3,
-        ),
-        onSubmitted: (_) => _submit(),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            enabled: !_busy,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+              labelText: 'RSS-adres of YouTube-kanaal',
+              hintText: 'https://… of @kanaalnaam',
+              helperText: 'Podcastfeed, YouTube-kanaal (youtube.com/@naam) of playlist',
+              helperMaxLines: 2,
+              errorText: _error,
+              errorMaxLines: 3,
+              prefixIcon: Icon(_isYouTube ? Icons.smart_display : Icons.rss_feed),
+            ),
+            onSubmitted: (_) => _submit(),
+          ),
+          if (_isYouTube)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _audioOnly,
+              onChanged: _busy ? null : (v) => setState(() => _audioOnly = v),
+              title: const Text('Afspelen als podcast'),
+              subtitle: const Text('Alleen audio, zonder beeld. Bespaart veel data.'),
+            ),
+        ],
       ),
       actions: [
         TextButton(

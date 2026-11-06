@@ -8,13 +8,17 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../models.dart';
 import 'rss_service.dart';
 import 'storage.dart';
+import 'youtube_service.dart';
 
 /// Centrale app-status: abonnementen, lokale video's en de speler.
 class AppState extends ChangeNotifier {
   final Storage storage;
   final RssService rss;
+  final YouTubeService youtube;
 
-  AppState(this.storage, {RssService? rss}) : rss = rss ?? RssService() {
+  AppState(this.storage, {RssService? rss, YouTubeService? youtube})
+      : rss = rss ?? RssService(),
+        youtube = youtube ?? YouTubeService() {
     feeds = storage.loadFeeds();
     localVideos = storage.loadLocalVideos();
     finished = storage.finished();
@@ -45,18 +49,58 @@ class AppState extends ChangeNotifier {
   bool isLoading(String feedUrl) => _loading.contains(feedUrl);
 
   /// Voegt een feed toe na hem eerst op te halen (zodat een fout direct zichtbaar is).
-  Future<Feed> addFeed(String url) async {
+  /// Een YouTube-kanaal, `@handle` of playlist wordt omgezet naar de RSS-feed van YouTube.
+  /// Met [audioOnly] worden video's uit deze feed als podcast (alleen audio) afgespeeld.
+  Future<Feed> addFeed(String url, {bool audioOnly = false}) async {
     var normalized = url.trim();
-    if (!normalized.startsWith(RegExp(r'https?://'))) normalized = 'https://$normalized';
+    String? fallbackImage;
+    String? fallbackTitle;
+    if (YouTubeService.looksLikeYouTube(normalized)) {
+      final ref = await youtube.resolveFeed(normalized);
+      normalized = ref.feedUrl;
+      fallbackImage = ref.imageUrl;
+      fallbackTitle = ref.title;
+    } else if (!normalized.startsWith(RegExp(r'https?://'))) {
+      normalized = 'https://$normalized';
+    }
     if (feeds.any((f) => f.url == normalized)) {
       throw Exception('Deze feed staat al in je lijst');
     }
     final result = await rss.fetch(normalized);
-    feeds = [...feeds, result.feed];
+    final feed = Feed(
+      url: normalized,
+      title: result.feed.title == normalized && fallbackTitle != null
+          ? fallbackTitle
+          : result.feed.title,
+      description: result.feed.description,
+      // YouTube-feeds hebben geen afbeelding: gebruik het kanaallogo of de eerste thumbnail.
+      imageUrl: result.feed.imageUrl ??
+          fallbackImage ??
+          (result.episodes.isNotEmpty ? result.episodes.first.imageUrl : null),
+      lastFetched: result.feed.lastFetched,
+      audioOnly: audioOnly,
+    );
+    feeds = [...feeds, feed];
     _episodes[normalized] = result.episodes;
     await storage.saveFeeds(feeds);
     notifyListeners();
-    return result.feed;
+    return feed;
+  }
+
+  /// Video's uit deze feed als podcast afspelen (alleen audio) of met beeld.
+  Future<void> setAudioOnly(Feed feed, bool audioOnly) async {
+    feeds = [
+      for (final f in feeds) f.url == feed.url ? f.copyWith(audioOnly: audioOnly) : f
+    ];
+    await storage.saveFeeds(feeds);
+    notifyListeners();
+  }
+
+  Feed? feedByUrl(String url) {
+    for (final f in feeds) {
+      if (f.url == url) return f;
+    }
+    return null;
   }
 
   Future<void> removeFeed(Feed feed) async {
@@ -155,15 +199,32 @@ class AppState extends ChangeNotifier {
   Duration? savedPosition(String id) => storage.position(id);
 
   Future<void> play(MediaItem item) async {
-    if (current?.id == item.id) {
+    // Zelfde item in dezelfde vorm: gewoon doorgaan. Wisselen tussen audio en
+    // video van hetzelfde item opent hem opnieuw vanaf de huidige positie.
+    if (current?.id == item.id && current?.kind == item.kind) {
       await player.play();
       return;
     }
     await _saveCurrentPosition();
+    final previous = current;
     current = item;
     notifyListeners();
+    final String uri;
+    try {
+      uri = item.youtubeId != null
+          ? (await youtube.streamUrl(item.youtubeId!, audioOnly: item.kind == MediaKind.audio))
+              .toString()
+          : item.uri;
+    } catch (_) {
+      // Stream ophalen mislukt: het vorige item speelt nog gewoon door.
+      if (identical(current, item)) {
+        current = previous;
+        notifyListeners();
+      }
+      rethrow;
+    }
     final start = storage.position(item.id);
-    await player.open(Media(item.uri, start: start));
+    await player.open(Media(uri, start: start));
     await player.setRate(rate);
   }
 
@@ -202,6 +263,7 @@ class AppState extends ChangeNotifier {
       s.cancel();
     }
     _player?.dispose();
+    youtube.close();
     super.dispose();
   }
 }

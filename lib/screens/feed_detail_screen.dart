@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
 import '../services/app_state.dart';
@@ -66,6 +67,25 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       appBar: AppBar(
         title: Text(feed.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          if (feed.isYouTube)
+            IconButton(
+              tooltip: feed.audioOnly
+                  ? 'Alleen audio (tik voor video met beeld)'
+                  : 'Video met beeld (tik voor alleen audio)',
+              isSelected: feed.audioOnly,
+              icon: const Icon(Icons.videocam_outlined),
+              selectedIcon: const Icon(Icons.headphones),
+              onPressed: () {
+                state.setAudioOnly(feed, !feed.audioOnly);
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(SnackBar(
+                    content: Text(!feed.audioOnly
+                        ? 'Afspelen als podcast: alleen audio'
+                        : 'Afspelen als video met beeld'),
+                  ));
+              },
+            ),
           IconButton(
             tooltip: 'Vernieuwen',
             onPressed: loading ? null : _refresh,
@@ -129,23 +149,26 @@ class _EpisodeTile extends StatelessWidget {
       if (saved != null && !done) 'verder vanaf ${formatDuration(saved)}',
       if (done) 'beluisterd',
     ].join(' · ');
+    final kind = _item().kind;
 
     return ListTile(
       leading: Stack(
         children: [
           Cover(
             url: episode.imageUrl,
-            fallbackIcon: episode.kind == MediaKind.video ? Icons.movie : Icons.podcasts,
+            fallbackIcon: kind == MediaKind.video ? Icons.movie : Icons.podcasts,
           ),
-          if (episode.kind == MediaKind.video)
-            const Positioned(
-              right: 2,
-              bottom: 2,
-              child: Icon(Icons.videocam,
-                  size: 16,
-                  color: Colors.white,
-                  shadows: [Shadow(color: Colors.black54, blurRadius: 4)]),
-            ),
+          Positioned(
+            right: 2,
+            bottom: 2,
+            child: Icon(
+                kind == MediaKind.video
+                    ? Icons.videocam
+                    : (episode.youtubeId != null ? Icons.headphones : null),
+                size: 16,
+                color: Colors.white,
+                shadows: const [Shadow(color: Colors.black54, blurRadius: 4)]),
+          ),
         ],
       ),
       title: Text(
@@ -167,10 +190,36 @@ class _EpisodeTile extends StatelessWidget {
     );
   }
 
-  Future<void> _play(BuildContext context) async {
+  /// Hoe deze aflevering afgespeeld wordt: YouTube-feeds met "alleen audio" als podcast.
+  MediaItem _item({bool? audioOnly}) => MediaItem.fromEpisode(
+        episode,
+        feedTitle: feed.title,
+        audioOnly: episode.youtubeId != null && (audioOnly ?? feed.audioOnly),
+      );
+
+  Future<void> _play(BuildContext context, {bool? audioOnly}) async {
     final state = AppScope.read(context);
-    await state.play(MediaItem.fromEpisode(episode, feedTitle: feed.title));
-    if (episode.kind == MediaKind.video && context.mounted) {
+    final messenger = ScaffoldMessenger.of(context);
+    final item = _item(audioOnly: audioOnly);
+    try {
+      await state.play(item);
+    } catch (e) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          content: Text('Afspelen mislukt: $e'),
+          duration: const Duration(seconds: 8),
+          action: episode.youtubeId == null
+              ? null
+              : SnackBarAction(
+                  label: 'Open in YouTube',
+                  onPressed: () => launchUrl(Uri.parse(episode.mediaUrl),
+                      mode: LaunchMode.externalApplication),
+                ),
+        ));
+      return;
+    }
+    if (item.kind == MediaKind.video && context.mounted) {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlayerScreen()));
     }
   }
@@ -192,15 +241,34 @@ class _EpisodeTile extends StatelessWidget {
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
+              runSpacing: 8,
               children: [
-                FilledButton.icon(
-                  onPressed: () {
-                    Navigator.pop(c);
-                    _play(context);
-                  },
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Afspelen'),
-                ),
+                if (episode.youtubeId == null)
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.pop(c);
+                      _play(context);
+                    },
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Afspelen'),
+                  )
+                else ...[
+                  for (final audio in feed.audioOnly ? [true, false] : [false, true])
+                    (audio == feed.audioOnly ? FilledButton.icon : OutlinedButton.icon)(
+                      onPressed: () {
+                        Navigator.pop(c);
+                        _play(context, audioOnly: audio);
+                      },
+                      icon: Icon(audio ? Icons.headphones : Icons.smart_display),
+                      label: Text(audio ? 'Luisteren (alleen audio)' : 'Video bekijken'),
+                    ),
+                  TextButton.icon(
+                    onPressed: () => launchUrl(Uri.parse(episode.mediaUrl),
+                        mode: LaunchMode.externalApplication),
+                    icon: const Icon(Icons.open_in_new),
+                    label: const Text('Open in YouTube'),
+                  ),
+                ],
                 OutlinedButton.icon(
                   onPressed: () {
                     state.toggleFinished(episode.id);

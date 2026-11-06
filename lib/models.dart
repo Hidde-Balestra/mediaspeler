@@ -3,6 +3,31 @@ library;
 
 enum MediaKind { audio, video }
 
+final _ytHost = RegExp(r'^(www\.|m\.|music\.)?(youtube\.com|youtube-nocookie\.com)$|^youtu\.be$');
+final _ytId = RegExp(r'^[\w-]{11}$');
+
+/// Of [url] naar YouTube wijst.
+bool isYouTubeUrl(String url) {
+  final host = Uri.tryParse(url.trim())?.host.toLowerCase() ?? '';
+  return _ytHost.hasMatch(host);
+}
+
+/// Haalt het video-id uit een YouTube-link (watch, youtu.be, shorts, live, embed).
+String? youtubeVideoId(String url) {
+  final uri = Uri.tryParse(url.trim());
+  if (uri == null || !isYouTubeUrl(url)) return null;
+  String? id;
+  if (uri.host.toLowerCase() == 'youtu.be') {
+    id = uri.pathSegments.isNotEmpty ? uri.pathSegments.first : null;
+  } else if (uri.queryParameters['v'] != null) {
+    id = uri.queryParameters['v'];
+  } else if (uri.pathSegments.length >= 2 &&
+      const ['shorts', 'live', 'embed', 'v'].contains(uri.pathSegments.first)) {
+    id = uri.pathSegments[1];
+  }
+  return id != null && _ytId.hasMatch(id) ? id : null;
+}
+
 class Feed {
   final String url;
   final String title;
@@ -10,19 +35,26 @@ class Feed {
   final String? imageUrl;
   final DateTime? lastFetched;
 
+  /// Video's uit deze feed afspelen als podcast: alleen de audio ophalen.
+  final bool audioOnly;
+
   const Feed({
     required this.url,
     required this.title,
     this.description,
     this.imageUrl,
     this.lastFetched,
+    this.audioOnly = false,
   });
+
+  bool get isYouTube => isYouTubeUrl(url);
 
   Feed copyWith({
     String? title,
     String? description,
     String? imageUrl,
     DateTime? lastFetched,
+    bool? audioOnly,
   }) =>
       Feed(
         url: url,
@@ -30,6 +62,7 @@ class Feed {
         description: description ?? this.description,
         imageUrl: imageUrl ?? this.imageUrl,
         lastFetched: lastFetched ?? this.lastFetched,
+        audioOnly: audioOnly ?? this.audioOnly,
       );
 
   Map<String, dynamic> toJson() => {
@@ -38,6 +71,7 @@ class Feed {
         'description': description,
         'imageUrl': imageUrl,
         'lastFetched': lastFetched?.toIso8601String(),
+        'audioOnly': audioOnly,
       };
 
   factory Feed.fromJson(Map<String, dynamic> j) => Feed(
@@ -48,6 +82,7 @@ class Feed {
         lastFetched: j['lastFetched'] != null
             ? DateTime.tryParse(j['lastFetched'] as String)
             : null,
+        audioOnly: j['audioOnly'] as bool? ?? false,
       );
 }
 
@@ -74,7 +109,11 @@ class Episode {
     this.imageUrl,
   });
 
+  /// Video-id als dit een YouTube-video is (de stream wordt pas bij afspelen opgehaald).
+  String? get youtubeId => youtubeVideoId(mediaUrl);
+
   MediaKind get kind {
+    if (youtubeId != null) return MediaKind.video;
     final mime = mimeType?.toLowerCase() ?? '';
     if (mime.startsWith('video')) return MediaKind.video;
     if (mime.startsWith('audio')) return MediaKind.audio;
@@ -111,6 +150,9 @@ class MediaItem {
   final MediaKind kind;
   final String? imageUrl;
 
+  /// Gezet voor YouTube-video's; [uri] is dan de kijk-link, niet de stream.
+  final String? youtubeId;
+
   const MediaItem({
     required this.id,
     required this.title,
@@ -118,15 +160,19 @@ class MediaItem {
     required this.kind,
     this.subtitle,
     this.imageUrl,
+    this.youtubeId,
   });
 
-  factory MediaItem.fromEpisode(Episode e, {String? feedTitle}) => MediaItem(
+  /// Met [audioOnly] wordt een video als audio afgespeeld (zonder beeld).
+  factory MediaItem.fromEpisode(Episode e, {String? feedTitle, bool audioOnly = false}) =>
+      MediaItem(
         id: e.id,
         title: e.title,
         subtitle: feedTitle,
         uri: e.mediaUrl,
-        kind: e.kind,
+        kind: audioOnly ? MediaKind.audio : e.kind,
         imageUrl: e.imageUrl,
+        youtubeId: e.youtubeId,
       );
 
   factory MediaItem.fromLocal(LocalVideo v) => MediaItem(

@@ -6,6 +6,7 @@ import 'package:mediaspeler/models.dart';
 import 'package:mediaspeler/services/app_state.dart';
 import 'package:mediaspeler/services/rss_service.dart';
 import 'package:mediaspeler/services/storage.dart';
+import 'package:mediaspeler/services/youtube_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _feedXml = '''<?xml version="1.0"?>
@@ -17,18 +18,43 @@ const _feedXml = '''<?xml version="1.0"?>
   </item>
 </channel></rss>''';
 
+/// Nep-YouTube: geen netwerk, wel bijhouden wat er gevraagd wordt.
+class FakeYouTube extends YouTubeService {
+  final List<String> resolved = [];
+  final List<(String, bool)> streams = [];
+  Object? streamError;
+
+  @override
+  Future<YouTubeFeedRef> resolveFeed(String input) async {
+    resolved.add(input);
+    return const YouTubeFeedRef(
+        'https://www.youtube.com/feeds/videos.xml?channel_id=UCtest',
+        title: 'Kanaal',
+        imageUrl: 'https://yt3.example/logo.jpg');
+  }
+
+  @override
+  Future<Uri> streamUrl(String videoId, {required bool audioOnly}) async {
+    streams.add((videoId, audioOnly));
+    if (streamError != null) throw streamError!;
+    return Uri.parse('https://stream.example/$videoId');
+  }
+}
+
 void main() {
   late List<Uri> requested;
+  late FakeYouTube youtube;
 
   Future<AppState> makeState({Map<String, Object> prefs = const {}}) async {
     SharedPreferences.setMockInitialValues(prefs);
     requested = [];
+    youtube = FakeYouTube();
     final client = MockClient((req) async {
       requested.add(req.url);
       if (req.url.host == 'kapot.nl') return http.Response('weg', 404);
       return http.Response(_feedXml, 200);
     });
-    return AppState(await Storage.open(), rss: RssService(client));
+    return AppState(await Storage.open(), rss: RssService(client), youtube: youtube);
   }
 
   group('feeds', () {
@@ -151,5 +177,57 @@ void main() {
     final state = await makeState();
     await state.stop();
     expect(state.current, isNull);
+  });
+
+  group('YouTube', () {
+    test('kanaal toevoegen via @handle met alleen-audio', () async {
+      final state = await makeState();
+      final feed = await state.addFeed('@kanaal', audioOnly: true);
+
+      expect(youtube.resolved, ['@kanaal']);
+      expect(requested.single.toString(),
+          'https://www.youtube.com/feeds/videos.xml?channel_id=UCtest');
+      expect(feed.url, 'https://www.youtube.com/feeds/videos.xml?channel_id=UCtest');
+      expect(feed.audioOnly, isTrue);
+      expect(feed.imageUrl, 'https://yt3.example/logo.jpg',
+          reason: 'YouTube-feeds hebben geen eigen afbeelding');
+      expect(state.storage.loadFeeds().single.audioOnly, isTrue);
+    });
+
+    test('hetzelfde kanaal via een andere link is een dubbele', () async {
+      final state = await makeState();
+      await state.addFeed('@kanaal');
+      expect(() => state.addFeed('https://www.youtube.com/@kanaal'), throwsException);
+    });
+
+    test('gewone feeds gaan niet langs YouTube', () async {
+      final state = await makeState();
+      await state.addFeed('https://example.com/rss', audioOnly: true);
+      expect(youtube.resolved, isEmpty);
+    });
+
+    test('setAudioOnly wijzigt en bewaart de keuze', () async {
+      final state = await makeState();
+      final feed = await state.addFeed('@kanaal');
+      expect(feed.audioOnly, isFalse);
+      await state.setAudioOnly(feed, true);
+      expect(state.feedByUrl(feed.url)!.audioOnly, isTrue);
+      expect(state.storage.loadFeeds().single.audioOnly, isTrue);
+    });
+
+    test('mislukte stream: foutmelding en niets blijft hangen als "speelt nu"', () async {
+      final state = await makeState();
+      youtube.streamError = const YouTubeException('geblokkeerd');
+      const item = MediaItem(
+        id: 'yt:video:dQw4w9WgXcQ',
+        title: 'Video',
+        uri: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+        kind: MediaKind.audio,
+        youtubeId: 'dQw4w9WgXcQ',
+      );
+      await expectLater(state.play(item), throwsA(isA<YouTubeException>()));
+      expect(youtube.streams.single, ('dQw4w9WgXcQ', true), reason: 'audio-only gevraagd');
+      expect(state.current, isNull);
+    });
   });
 }

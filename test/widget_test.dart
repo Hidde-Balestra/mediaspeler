@@ -83,4 +83,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('HTTP 500'), findsOneWidget);
   });
+
+  testWidgets('YouTube-link toont de optie "Afspelen als podcast"', (tester) async {
+    await tester.pumpWidget(MediaspelerApp(state: await _state()));
+    await tester.tap(find.text('Feed toevoegen'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'https://example.com/rss');
+    await tester.pump();
+    expect(find.text('Afspelen als podcast'), findsNothing);
+
+    await tester.enterText(find.byType(TextField), 'youtube.com/@kanaal');
+    await tester.pump();
+    expect(find.text('Afspelen als podcast'), findsOneWidget);
+    expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value, isTrue);
+  });
 }

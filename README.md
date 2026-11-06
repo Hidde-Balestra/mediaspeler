@@ -8,6 +8,7 @@ Flutter-app voor podcasts en video's via RSS-feeds, en voor video's die op je ei
 - **Afspelen**: audio en video via [media_kit](https://pub.dev/packages/media_kit), met mini-speler, 10 s terug / 30 s vooruit en afspeelsnelheid (0,75x tot 2x).
 - **Verder waar je was**: de afspeelpositie wordt per aflevering/video bewaard; afgespeelde afleveringen krijgen de markering "beluisterd".
 - **Op apparaat**: video's kiezen met de bestandskiezer en ze in een lokale bibliotheek bewaren.
+- **YouTube**: een kanaal (`youtube.com/@naam`, `@naam`, `/channel/UC…`) of playlist toevoegen via hetzelfde invoerveld. Met **Afspelen als podcast** wordt alleen de audio opgehaald (zuinigste stream tot 96 kbit/s, meestal 70–90% minder data dan video). Per kanaal om te zetten via het koptelefoon-icoon; per video kun je ook kiezen voor "Video bekijken" of "Open in YouTube".
 - **Thema**: licht, donker of systeem volgen; te kiezen via het thema-icoon rechtsboven en bewaard tussen sessies.
 - **Op de achtergrond**: afspelen gaat door als de app op de achtergrond staat of het scherm uit is, met bediening via de melding, het vergrendelscherm en koptelefoonknoppen (Android en iOS, via `audio_service`). Op Windows speelt de app op de achtergrond gewoon door.
 
@@ -72,6 +73,7 @@ lib/
     storage.dart             opslag (shared_preferences)
     app_state.dart           centrale status + speler
     media_session.dart       koppeling met de systeem-mediasessie
+    youtube_service.dart     YouTube-kanalen → RSS, streams ophalen
   screens/                   feeds, feed-detail, lokale video's, speler
   widgets/                   mini-speler, cover, opmaakhulpjes
 ```
@@ -80,3 +82,5 @@ lib/
 
 - Op Android wordt een gekozen video bewaard als `content://`-URI. Na een herstart kan de toegang daartoe vervallen; kies de video dan opnieuw.
 - Feeds worden alleen vernieuwd als je een feed opent of op vernieuwen tikt.
+- YouTube: de lijst met video's komt uit YouTube's officiële RSS-feed (de laatste 15 video's per kanaal). Het afspelen gebruikt [youtube_explode_dart](https://pub.dev/packages/youtube_explode_dart) en werkt niet altijd: YouTube kan het ophalen tijdelijk blokkeren ("bot-controle"), vooral bij veel verzoeken of bij recente video's. De app toont dan een melding met de knop "Open in YouTube". Dit gebruik valt buiten de gebruiksvoorwaarden van YouTube; bedoeld voor persoonlijk gebruik.
+- YouTube-video's met beeld spelen in maximaal 360p (de enige streams met beeld én geluid samen).

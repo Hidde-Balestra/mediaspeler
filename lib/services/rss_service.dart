@@ -94,6 +94,13 @@ class RssService {
     final episodes = <Episode>[];
     for (final entry in root.findElements('entry')) {
       (String, String?)? media;
+      String? description;
+      // YouTube-kanaal/-playlist: de kijk-link; de stream wordt pas bij afspelen opgehaald.
+      final ytId = _text(_child(entry, 'videoId', ns: 'yt'));
+      if (ytId != null) {
+        media = ('https://www.youtube.com/watch?v=$ytId', 'video/youtube');
+        description = _text(_child(_child(entry, 'group', ns: 'media'), 'description', ns: 'media'));
+      }
       for (final link in entry.findElements('link')) {
         if (link.getAttribute('rel') == 'enclosure') {
           final href = link.getAttribute('href');
@@ -106,8 +113,9 @@ class RssService {
         id: _text(_child(entry, 'id')) ?? media.$1,
         feedUrl: url,
         title: _text(_child(entry, 'title')) ?? 'Zonder titel',
-        description: _stripHtml(
-            _text(_child(entry, 'summary')) ?? _text(_child(entry, 'content'))),
+        description: _stripHtml(description ??
+            _text(_child(entry, 'summary')) ??
+            _text(_child(entry, 'content'))),
         mediaUrl: media.$1,
         mimeType: media.$2,
         published: DateTime.tryParse(
@@ -125,9 +133,9 @@ class RssService {
     if (encUrl != null) return (encUrl, _attr(enc, 'type'));
 
     final candidates = [
-      ...item.findElements('content', namespaceUri: _mediaNs),
+      ...item.findElements('content', namespace: _mediaNs),
       ..._children(item, 'group', ns: 'media')
-          .expand((g) => g.findElements('content', namespaceUri: _mediaNs)),
+          .expand((g) => g.findElements('content', namespace: _mediaNs)),
     ];
     for (final c in candidates) {
       final u = c.getAttribute('url');
