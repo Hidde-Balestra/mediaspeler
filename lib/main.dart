@@ -1,15 +1,45 @@
+import 'dart:io' show Platform;
+
+import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'screens/home_screen.dart';
 import 'services/app_state.dart';
+import 'services/media_session.dart';
 import 'services/storage.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   final storage = await Storage.open();
-  runApp(MediaspelerApp(state: AppState(storage)));
+  final state = AppState(storage);
+  await _initMediaSession(state);
+  runApp(MediaspelerApp(state: state));
+}
+
+/// Achtergrond-afspelen en bediening via melding/vergrendelscherm (Android, iOS).
+/// Op Windows speelt de app op de achtergrond gewoon door.
+Future<void> _initMediaSession(AppState state) async {
+  if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) return;
+  try {
+    await AudioService.init(
+      builder: () => MediaSessionHandler(state),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'nl.hiddebalestra.mediaspeler.playback',
+        androidNotificationChannelName: 'Afspelen',
+        androidNotificationIcon: 'mipmap/ic_launcher',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: true,
+        rewindInterval: rewindInterval,
+        fastForwardInterval: fastForwardInterval,
+      ),
+    );
+  } catch (e) {
+    // De app werkt ook zonder mediasessie, alleen niet op de achtergrond.
+    debugPrint('Mediasessie starten mislukt: $e');
+  }
 }
 
 const _seed = Color(0xFF6750A4);

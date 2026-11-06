@@ -1,5 +1,6 @@
 package nl.hiddebalestra.mediaspeler
 
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 
-class MainActivity : FlutterActivity()
+// AudioServiceActivity deelt de Flutter-engine met de achtergrond-afspeelservice.
+class MainActivity : AudioServiceActivity()

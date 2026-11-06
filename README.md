@@ -9,6 +9,7 @@ Flutter-app voor podcasts en video's via RSS-feeds, en voor video's die op je ei
 - **Verder waar je was**: de afspeelpositie wordt per aflevering/video bewaard; afgespeelde afleveringen krijgen de markering "beluisterd".
 - **Op apparaat**: video's kiezen met de bestandskiezer en ze in een lokale bibliotheek bewaren.
 - **Thema**: licht, donker of systeem volgen; te kiezen via het thema-icoon rechtsboven en bewaard tussen sessies.
+- **Op de achtergrond**: afspelen gaat door als de app op de achtergrond staat of het scherm uit is, met bediening via de melding, het vergrendelscherm en koptelefoonknoppen (Android en iOS, via `audio_service`). Op Windows speelt de app op de achtergrond gewoon door.
 
 ## Platforms
 
@@ -44,7 +45,7 @@ De tests staan in `test/` en dekken de modellen, de opslag, het parsen en ophale
 
 ### Eigen signing-sleutel (aanbevolen)
 
-Zonder sleutel wordt de APK met de debug-sleutel getekend. Dat werkt, maar Android accepteert een update dan niet als je later naar een eigen sleutel overstapt. Maak eenmalig een keystore aan en zet deze repository-secrets:
+Vanaf v1.1.0 zijn de secrets ingesteld en wordt de APK met een eigen sleutel getekend. Zonder sleutel valt de workflow terug op de debug-sleutel. Dat werkt, maar Android accepteert een update dan niet als je later naar een eigen sleutel overstapt. Maak eenmalig een keystore aan en zet deze repository-secrets:
 
 ```sh
 keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
@@ -70,6 +71,7 @@ lib/
     rss_service.dart         ophalen + parsen van RSS/Atom
     storage.dart             opslag (shared_preferences)
     app_state.dart           centrale status + speler
+    media_session.dart       koppeling met de systeem-mediasessie
   screens/                   feeds, feed-detail, lokale video's, speler
   widgets/                   mini-speler, cover, opmaakhulpjes
 ```
@@ -77,5 +79,4 @@ lib/
 ## Bekende beperkingen
 
 - Op Android wordt een gekozen video bewaard als `content://`-URI. Na een herstart kan de toegang daartoe vervallen; kies de video dan opnieuw.
-- Op de achtergrond afspelen met bediening op het vergrendelscherm zit er nog niet in (daarvoor is bijvoorbeeld `audio_service` nodig).
 - Feeds worden alleen vernieuwd als je een feed opent of op vernieuwen tikt.
