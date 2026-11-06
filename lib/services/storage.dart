@@ -11,6 +11,7 @@ class Storage {
   static const _localKey = 'local_videos';
   static const _posPrefix = 'pos:';
   static const _doneKey = 'finished';
+  static const _themeKey = 'theme_mode';
 
   final SharedPreferences _prefs;
   Storage._(this._prefs);
@@ -42,6 +43,10 @@ class Storage {
     done ? set.add(id) : set.remove(id);
     return _prefs.setStringList(_doneKey, set.toList());
   }
+
+  /// Thema-voorkeur: 'system', 'light' of 'dark'.
+  String? themeMode() => _prefs.getString(_themeKey);
+  Future<void> setThemeMode(String mode) => _prefs.setString(_themeKey, mode);
 
   List<T> _loadList<T>(String key, T Function(Map<String, dynamic>) fromJson) {
     final raw = _prefs.getString(key);

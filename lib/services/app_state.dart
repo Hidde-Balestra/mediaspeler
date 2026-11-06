@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -17,8 +18,21 @@ class AppState extends ChangeNotifier {
     feeds = storage.loadFeeds();
     localVideos = storage.loadLocalVideos();
     finished = storage.finished();
-    _listenToPlayer();
+    themeMode = parseThemeMode(storage.themeMode());
   }
+
+  // ---------------- Thema ----------------
+
+  late ThemeMode themeMode;
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    themeMode = mode;
+    notifyListeners();
+    await storage.setThemeMode(mode.name);
+  }
+
+  static ThemeMode parseThemeMode(String? s) =>
+      ThemeMode.values.firstWhere((m) => m.name == s, orElse: () => ThemeMode.system);
 
   // ---------------- Feeds ----------------
 
@@ -103,7 +117,10 @@ class AppState extends ChangeNotifier {
 
   // ---------------- Speler ----------------
 
-  final Player player = Player();
+  // De speler wordt pas aangemaakt bij eerste gebruik, zodat de rest van de
+  // app-status ook zonder native media-bibliotheken werkt (bijv. in tests).
+  Player? _player;
+  Player get player => _player ??= _createPlayer();
   late final VideoController videoController = VideoController(player);
   MediaItem? current;
   double rate = 1.0;
@@ -111,7 +128,8 @@ class AppState extends ChangeNotifier {
   final List<StreamSubscription> _subs = [];
   DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
 
-  void _listenToPlayer() {
+  Player _createPlayer() {
+    final player = Player();
     _subs.add(player.stream.position.listen((pos) {
       final item = current;
       if (item == null) return;
@@ -131,6 +149,7 @@ class AppState extends ChangeNotifier {
         notifyListeners();
       }
     }));
+    return player;
   }
 
   Duration? savedPosition(String id) => storage.position(id);
@@ -164,15 +183,16 @@ class AppState extends ChangeNotifier {
 
   Future<void> stop() async {
     await _saveCurrentPosition();
-    await player.stop();
+    await _player?.stop();
     current = null;
     notifyListeners();
   }
 
   Future<void> _saveCurrentPosition() async {
     final item = current;
-    if (item == null) return;
-    final pos = player.state.position;
+    final p = _player;
+    if (item == null || p == null) return;
+    final pos = p.state.position;
     if (pos > const Duration(seconds: 5)) await storage.savePosition(item.id, pos);
   }
 
@@ -181,7 +201,7 @@ class AppState extends ChangeNotifier {
     for (final s in _subs) {
       s.cancel();
     }
-    player.dispose();
+    _player?.dispose();
     super.dispose();
   }
 }

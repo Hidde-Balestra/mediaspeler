@@ -141,7 +141,10 @@ class _EpisodeTile extends StatelessWidget {
             const Positioned(
               right: 2,
               bottom: 2,
-              child: Icon(Icons.videocam, size: 16, color: Colors.white),
+              child: Icon(Icons.videocam,
+                  size: 16,
+                  color: Colors.white,
+                  shadows: [Shadow(color: Colors.black54, blurRadius: 4)]),
             ),
         ],
       ),

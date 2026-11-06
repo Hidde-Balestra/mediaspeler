@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:mediaspeler/models.dart';
 import 'package:mediaspeler/services/rss_service.dart';
 import 'package:xml/xml.dart';
@@ -55,5 +59,103 @@ void main() {
     expect(r.feed.title, 'Atomkanaal');
     expect(r.episodes.single.mediaUrl, 'https://example.com/a1.webm');
     expect(r.episodes.single.kind, MediaKind.video);
+  });
+
+  test('media:content binnen media:group met thumbnail', () {
+    const xml = '''<?xml version="1.0"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>Kanaal</title>
+    <image><url>https://example.com/logo.png</url></image>
+    <item>
+      <title>Clip</title>
+      <media:group>
+        <media:content url="https://example.com/clip.jpg" medium="image"/>
+        <media:content url="https://example.com/clip.mp4" medium="video"/>
+        <media:thumbnail url="https://example.com/thumb.jpg"/>
+      </media:group>
+    </item>
+  </channel>
+</rss>''';
+    final r = rss.parse('u', XmlDocument.parse(xml));
+    expect(r.feed.imageUrl, 'https://example.com/logo.png');
+    final ep = r.episodes.single;
+    expect(ep.mediaUrl, 'https://example.com/clip.mp4');
+    expect(ep.mimeType, 'video/*');
+    expect(ep.kind, MediaKind.video);
+    expect(ep.imageUrl, 'https://example.com/thumb.jpg');
+    expect(ep.id, 'https://example.com/clip.mp4', reason: 'zonder guid is de media-URL het id');
+  });
+
+  test('beschrijving: HTML en entities worden opgeschoond', () {
+    const xml = '''<rss><channel><title>T</title><item>
+      <title>X</title>
+      <description><![CDATA[<p>Regel&nbsp;1</p><p>Tom &amp; Jerry<br/>"quote"</p>]]></description>
+      <enclosure url="https://e.nl/x.mp3" type="audio/mpeg"/>
+    </item></channel></rss>''';
+    final ep = rss.parse('u', XmlDocument.parse(xml)).episodes.single;
+    expect(ep.description, 'Regel 1\nTom & Jerry\n"quote"');
+  });
+
+  test('itunes:summary gaat voor description, duur in seconden of mm:ss', () {
+    const xml = '''<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel><title>T</title>
+      <item><title>A</title><description>lang</description><itunes:summary>kort</itunes:summary>
+        <itunes:duration>3600</itunes:duration>
+        <enclosure url="https://e.nl/a.mp3"/></item>
+      <item><title>B</title><itunes:duration>12:34</itunes:duration>
+        <enclosure url="https://e.nl/b.mp3"/></item>
+      <item><title>C</title><itunes:duration>onbekend</itunes:duration>
+        <enclosure url="https://e.nl/c.mp3"/></item>
+    </channel></rss>''';
+    final eps = rss.parse('u', XmlDocument.parse(xml)).episodes;
+    expect(eps[0].description, 'kort');
+    expect(eps[0].duration, const Duration(hours: 1));
+    expect(eps[1].duration, const Duration(minutes: 12, seconds: 34));
+    expect(eps[2].duration, isNull);
+  });
+
+  test('datums: RFC 822 met GMT, tweecijferig jaar en ISO', () {
+    String item(String date) => '<item><title>x</title><pubDate>$date</pubDate>'
+        '<enclosure url="https://e.nl/$date.mp3"/></item>';
+    final xml = '<rss><channel><title>T</title>'
+        '${item('Mon, 01 Jan 2024 12:00:00 GMT')}'
+        '${item('5 Feb 24 08:30 -0200')}'
+        '${item('2024-03-04T05:06:07Z')}'
+        '${item('geen datum')}'
+        '</channel></rss>';
+    final eps = rss.parse('u', XmlDocument.parse(xml)).episodes;
+    expect(eps[0].published!.toUtc(), DateTime.utc(2024, 1, 1, 12));
+    expect(eps[1].published!.toUtc(), DateTime.utc(2024, 2, 5, 10, 30));
+    expect(eps[2].published!.toUtc(), DateTime.utc(2024, 3, 4, 5, 6, 7));
+    expect(eps[3].published, isNull);
+  });
+
+  test('ongeldig document geeft een FormatException', () {
+    expect(() => rss.parse('u', XmlDocument.parse('<html><body/></html>')),
+        throwsFormatException);
+  });
+
+  group('fetch', () {
+    test('haalt op met de juiste headers en decodeert UTF-8', () async {
+      late http.Request seen;
+      final client = MockClient((req) async {
+        seen = req;
+        return http.Response.bytes(
+            utf8.encode('<rss><channel><title>Café ☕</title></channel></rss>'), 200,
+            headers: {'content-type': 'application/xml'});
+      });
+      final r = await RssService(client).fetch(' https://example.com/rss ');
+      expect(seen.url.toString(), 'https://example.com/rss');
+      expect(seen.headers['User-Agent'], startsWith('Mediaspeler/'));
+      expect(r.feed.title, 'Café ☕');
+    });
+
+    test('HTTP-fout geeft een duidelijke melding', () async {
+      final client = MockClient((_) async => http.Response('nee', 404));
+      expect(
+        RssService(client).fetch('https://example.com/rss'),
+        throwsA(predicate((e) => e.toString().contains('HTTP 404'))),
+      );
+    });
   });
 }

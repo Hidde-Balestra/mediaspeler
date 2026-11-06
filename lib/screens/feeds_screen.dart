@@ -12,7 +12,10 @@ class FeedsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Feeds')),
+      appBar: AppBar(
+        title: const Text('Feeds'),
+        actions: const [ThemeMenuButton()],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _showAddDialog(context),
         icon: const Icon(Icons.add),

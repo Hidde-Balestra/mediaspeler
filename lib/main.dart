@@ -12,22 +12,32 @@ Future<void> main() async {
   runApp(MediaspelerApp(state: AppState(storage)));
 }
 
+const _seed = Color(0xFF6750A4);
+
+/// Licht of donker Material 3-thema op basis van dezelfde accentkleur.
+ThemeData buildTheme(Brightness brightness) => ThemeData(
+      colorScheme: ColorScheme.fromSeed(seedColor: _seed, brightness: brightness),
+      useMaterial3: true,
+    );
+
 class MediaspelerApp extends StatelessWidget {
   final AppState state;
   const MediaspelerApp({super.key, required this.state});
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF6750A4);
     return AppScope(
       state: state,
-      child: MaterialApp(
-        title: 'Mediaspeler',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorSchemeSeed: seed, useMaterial3: true),
-        darkTheme: ThemeData(
-            colorSchemeSeed: seed, brightness: Brightness.dark, useMaterial3: true),
-        home: const HomeScreen(),
+      child: ListenableBuilder(
+        listenable: state,
+        builder: (context, _) => MaterialApp(
+          title: 'Mediaspeler',
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(Brightness.light),
+          darkTheme: buildTheme(Brightness.dark),
+          themeMode: state.themeMode,
+          home: const HomeScreen(),
+        ),
       ),
     );
   }

@@ -32,7 +32,10 @@ class LocalVideosScreen extends StatelessWidget {
     final state = AppScope.of(context);
     final videos = state.localVideos;
     return Scaffold(
-      appBar: AppBar(title: const Text('Op dit apparaat')),
+      appBar: AppBar(
+        title: const Text('Op dit apparaat'),
+        actions: const [ThemeMenuButton()],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _pick(context),
         icon: const Icon(Icons.video_file),

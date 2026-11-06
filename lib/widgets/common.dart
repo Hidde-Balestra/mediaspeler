@@ -1,5 +1,43 @@
 import 'package:flutter/material.dart';
 
+import '../services/app_state.dart';
+
+/// Knop in de app-balk om te kiezen tussen systeem-, licht en donker thema.
+class ThemeMenuButton extends StatelessWidget {
+  const ThemeMenuButton({super.key});
+
+  static const _labels = {
+    ThemeMode.system: 'Systeem',
+    ThemeMode.light: 'Licht',
+    ThemeMode.dark: 'Donker',
+  };
+
+  static const _icons = {
+    ThemeMode.system: Icons.brightness_auto,
+    ThemeMode.light: Icons.light_mode,
+    ThemeMode.dark: Icons.dark_mode,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final state = AppScope.of(context);
+    return PopupMenuButton<ThemeMode>(
+      tooltip: 'Thema',
+      icon: Icon(_icons[state.themeMode]),
+      initialValue: state.themeMode,
+      onSelected: state.setThemeMode,
+      itemBuilder: (_) => [
+        for (final mode in ThemeMode.values)
+          CheckedPopupMenuItem(
+            value: mode,
+            checked: mode == state.themeMode,
+            child: Text(_labels[mode]!),
+          ),
+      ],
+    );
+  }
+}
+
 String formatDuration(Duration d) {
   final h = d.inHours;
   final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
