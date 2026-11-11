@@ -153,6 +153,10 @@ class YouTubeService {
     return url;
   }
 
+  /// Vergeet een (verlopen) stream-URL, zodat de volgende keer een verse wordt opgehaald.
+  void invalidate(String videoId) =>
+      _cache.removeWhere((key, _) => key.startsWith('$videoId:'));
+
   static const retryDelay = Duration(seconds: 4);
   static const cooldown = Duration(minutes: 15);
   DateTime? _blockedUntil;

@@ -131,4 +131,33 @@ void main() {
     expect(state.feeds.single.isYouTube, isFalse);
     expect(find.text('Kanaal Podcast'), findsOneWidget, reason: 'staat in de lijst');
   });
+
+  testWidgets('na herstart: "Verder vanaf" met de bewaarde plek', (tester) async {
+    final state = await _state({
+      'last_played': '{"id":"ep1","title":"Aflevering 1","uri":"https://x/e.mp3","kind":"audio"}',
+      'pos:ep1': 754000,
+    });
+    await tester.pumpWidget(MediaspelerApp(state: state));
+    expect(find.text('Verder vanaf 12:34'), findsOneWidget);
+    expect(find.text('Aflevering 1'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Verbergen'));
+    await tester.pump();
+    expect(find.text('Verder vanaf 12:34'), findsNothing);
+    expect(state.storage.lastPlayed(), isNull);
+  });
+
+  testWidgets('tabblad Nieuw toont afleveringen van alle feeds', (tester) async {
+    final state = await _state({
+      'feeds': '[{"url":"https://a.example/rss","title":"Podcast A","lastFetched":"${DateTime.now().toIso8601String()}"}]',
+      'eps:https://a.example/rss':
+          '[{"id":"a1","feedUrl":"https://a.example/rss","title":"Nieuwste aflevering","mediaUrl":"https://a.example/1.mp3","published":"${DateTime.now().toIso8601String()}"}]',
+    });
+    await tester.pumpWidget(MediaspelerApp(state: state));
+    await tester.pumpAndSettle();
+    expect(find.text('Nieuw'), findsWidgets);
+    expect(find.text('Vandaag'), findsOneWidget);
+    expect(find.text('Nieuwste aflevering'), findsOneWidget);
+    expect(find.textContaining('Podcast A'), findsOneWidget);
+  });
 }

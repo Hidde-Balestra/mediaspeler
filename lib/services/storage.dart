@@ -12,6 +12,8 @@ class Storage {
   static const _posPrefix = 'pos:';
   static const _doneKey = 'finished';
   static const _themeKey = 'theme_mode';
+  static const _episodesPrefix = 'eps:';
+  static const _lastKey = 'last_played';
 
   final SharedPreferences _prefs;
   Storage._(this._prefs);
@@ -25,6 +27,28 @@ class Storage {
   List<LocalVideo> loadLocalVideos() => _loadList(_localKey, LocalVideo.fromJson);
   Future<void> saveLocalVideos(List<LocalVideo> videos) =>
       _prefs.setString(_localKey, jsonEncode(videos.map((v) => v.toJson()).toList()));
+
+  /// Laatst opgehaalde afleveringen per feed, zodat lijsten direct (en offline) gevuld zijn.
+  List<Episode> loadEpisodes(String feedUrl) =>
+      _loadList('$_episodesPrefix$feedUrl', Episode.fromJson);
+  Future<void> saveEpisodes(String feedUrl, List<Episode> episodes) => _prefs.setString(
+      '$_episodesPrefix$feedUrl', jsonEncode(episodes.map((e) => e.toJson()).toList()));
+  Future<void> clearEpisodes(String feedUrl) => _prefs.remove('$_episodesPrefix$feedUrl');
+
+  /// Laatst gespeelde item, voor "Verder luisteren" na een herstart.
+  MediaItem? lastPlayed() {
+    final raw = _prefs.getString(_lastKey);
+    if (raw == null) return null;
+    try {
+      return MediaItem.fromJson(Map<String, dynamic>.from(jsonDecode(raw) as Map));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> setLastPlayed(MediaItem? item) => item == null
+      ? _prefs.remove(_lastKey)
+      : _prefs.setString(_lastKey, jsonEncode(item.toJson()));
 
   Duration? position(String id) {
     final ms = _prefs.getInt('$_posPrefix$id');

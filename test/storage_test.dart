@@ -53,4 +53,30 @@ void main() {
     await s.setThemeMode('dark');
     expect((await Storage.open()).themeMode(), 'dark');
   });
+
+  test('laatst gespeeld en afleveringen per feed', () async {
+    final s = await Storage.open();
+    expect(s.lastPlayed(), isNull);
+    const item = MediaItem(
+        id: 'yt:video:x', title: 'T', uri: 'https://www.youtube.com/watch?v=x',
+        kind: MediaKind.audio, subtitle: 'Kanaal', youtubeId: 'x');
+    await s.setLastPlayed(item);
+    final back = (await Storage.open()).lastPlayed()!;
+    expect(back.id, item.id);
+    expect(back.kind, MediaKind.audio);
+    expect(back.youtubeId, 'x');
+    await s.setLastPlayed(null);
+    expect(s.lastPlayed(), isNull);
+
+    final ep = Episode(
+        id: 'e', feedUrl: 'f', title: 'Ep', mediaUrl: 'https://x/e.mp3',
+        published: DateTime.utc(2024, 1, 2), duration: const Duration(minutes: 3));
+    await s.saveEpisodes('f', [ep]);
+    final eps = s.loadEpisodes('f');
+    expect(eps.single.title, 'Ep');
+    expect(eps.single.published, DateTime.utc(2024, 1, 2));
+    expect(eps.single.duration, const Duration(minutes: 3));
+    await s.clearEpisodes('f');
+    expect(s.loadEpisodes('f'), isEmpty);
+  });
 }

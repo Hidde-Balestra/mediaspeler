@@ -9,6 +9,7 @@ import '../models.dart';
 import 'rss_service.dart';
 import 'storage.dart';
 import 'podcast_directory.dart';
+import 'source_resolver.dart';
 import 'youtube_service.dart';
 
 /// Centrale app-status: abonnementen, lokale video's en de speler.
@@ -17,13 +18,24 @@ class AppState extends ChangeNotifier {
   final RssService rss;
   final YouTubeService youtube;
   final PodcastDirectory podcasts;
+  late final SourceResolver sources =
+      _sources ?? SourceResolver(client: rss.client, directory: podcasts);
+  final SourceResolver? _sources;
 
   AppState(this.storage,
-      {RssService? rss, YouTubeService? youtube, PodcastDirectory? podcasts})
+      {RssService? rss,
+      YouTubeService? youtube,
+      PodcastDirectory? podcasts,
+      SourceResolver? sources})
       : rss = rss ?? RssService(),
         youtube = youtube ?? YouTubeService(),
-        podcasts = podcasts ?? PodcastDirectory() {
+        podcasts = podcasts ?? PodcastDirectory(),
+        _sources = sources {
     feeds = storage.loadFeeds();
+    for (final f in feeds) {
+      final cached = storage.loadEpisodes(f.url);
+      if (cached.isNotEmpty) _episodes[f.url] = cached;
+    }
     localVideos = storage.loadLocalVideos();
     finished = storage.finished();
     themeMode = parseThemeMode(storage.themeMode());
@@ -86,6 +98,7 @@ class AppState extends ChangeNotifier {
     );
     feeds = [...feeds, feed];
     _episodes[normalized] = result.episodes;
+    await storage.saveEpisodes(normalized, result.episodes);
     await storage.saveFeeds(feeds);
     notifyListeners();
     return feed;
@@ -119,6 +132,75 @@ class AppState extends ChangeNotifier {
   PodcastMatch? _unlessSubscribed(PodcastMatch? m) =>
       m == null || feeds.any((f) => f.url == m.feedUrl) ? null : m;
 
+  /// Alle afleveringen van alle feeds, nieuwste eerst (zonder datum achteraan).
+  List<(Episode, Feed)> allEpisodes({MediaKind? kind, bool hideFinished = false}) {
+    final out = <(Episode, Feed)>[];
+    for (final f in feeds) {
+      for (final e in _episodes[f.url] ?? const <Episode>[]) {
+        if (hideFinished && finished.contains(e.id)) continue;
+        if (kind != null && effectiveKind(e, f) != kind) continue;
+        out.add((e, f));
+      }
+    }
+    out.sort((a, b) {
+      final da = a.$1.published, db = b.$1.published;
+      if (da == null && db == null) return 0;
+      if (da == null) return 1;
+      if (db == null) return -1;
+      return db.compareTo(da);
+    });
+    return out;
+  }
+
+  /// Audio of video zoals hij afgespeeld wordt (YouTube "als podcast" telt als audio).
+  static MediaKind effectiveKind(Episode e, Feed f) =>
+      e.youtubeId != null && f.audioOnly ? MediaKind.audio : e.kind;
+
+  bool refreshingAll = false;
+
+  /// Vernieuwt alle feeds (een paar tegelijk). Geeft het aantal mislukte feeds terug.
+  Future<int> refreshAll() async {
+    if (refreshingAll) return 0;
+    refreshingAll = true;
+    notifyListeners();
+    var failed = 0;
+    try {
+      final queue = [...feeds];
+      Future<void> worker() async {
+        while (queue.isNotEmpty) {
+          final f = queue.removeLast();
+          try {
+            await refreshFeed(f);
+          } catch (_) {
+            failed++;
+          }
+        }
+      }
+
+      await Future.wait([for (var i = 0; i < 4; i++) worker()]);
+    } finally {
+      refreshingAll = false;
+      notifyListeners();
+    }
+    return failed;
+  }
+
+  /// De aflevering uit [feedUrl] die het best bij [title] past (voor links naar één aflevering).
+  Episode? findEpisode(String feedUrl, String title) {
+    Episode? best;
+    var bestScore = 0.0;
+    for (final e in _episodes[feedUrl] ?? const <Episode>[]) {
+      final s = e.title.trim().toLowerCase() == title.trim().toLowerCase()
+          ? 1.0
+          : PodcastDirectory.similarity(e.title, title);
+      if (s > bestScore) {
+        bestScore = s;
+        best = e;
+      }
+    }
+    return bestScore >= 0.6 ? best : null;
+  }
+
   Feed? feedByUrl(String url) {
     for (final f in feeds) {
       if (f.url == url) return f;
@@ -129,6 +211,7 @@ class AppState extends ChangeNotifier {
   Future<void> removeFeed(Feed feed) async {
     feeds = feeds.where((f) => f.url != feed.url).toList();
     _episodes.remove(feed.url);
+    await storage.clearEpisodes(feed.url);
     await storage.saveFeeds(feeds);
     notifyListeners();
   }
@@ -139,6 +222,7 @@ class AppState extends ChangeNotifier {
     try {
       final result = await rss.fetch(feed.url);
       _episodes[feed.url] = result.episodes;
+      await storage.saveEpisodes(feed.url, result.episodes);
       feeds = [
         for (final f in feeds)
           f.url == feed.url
@@ -194,22 +278,56 @@ class AppState extends ChangeNotifier {
 
   final List<StreamSubscription> _subs = [];
   DateTime _lastSave = DateTime.fromMillisecondsSinceEpoch(0);
+  AppLifecycleListener? _lifecycle;
+
+  /// Positie waar het huidige item moet beginnen; tot die bereikt is niets
+  /// opslaan (anders overschrijft de 0:00 van het laden je bewaarde plek).
+  Duration? _resumeTarget;
+  bool _recovering = false;
+
+  /// Laatst gespeelde item, voor "Verder luisteren" na het herstarten van de app.
+  MediaItem? get lastPlayed => current == null ? storage.lastPlayed() : null;
+
+  Future<void> forgetLastPlayed() async {
+    await storage.setLastPlayed(null);
+    notifyListeners();
+  }
 
   Player _createPlayer() {
     final player = Player();
     _subs.add(player.stream.position.listen((pos) {
       final item = current;
       if (item == null) return;
+      final target = _resumeTarget;
+      if (target != null) {
+        if (pos < target - const Duration(seconds: 3)) return;
+        _resumeTarget = null;
+      }
       // Elke 5 seconden de positie bewaren.
       if (DateTime.now().difference(_lastSave) > const Duration(seconds: 5)) {
         _lastSave = DateTime.now();
-        storage.savePosition(item.id, pos);
+        if (pos > const Duration(seconds: 5)) storage.savePosition(item.id, pos);
       }
     }));
+    // Bij pauzeren meteen bewaren (bijv. via het vergrendelscherm of koptelefoon).
+    _subs.add(player.stream.playing.listen((playing) {
+      if (!playing) _saveCurrentPosition();
+    }));
+    // Verlopen YouTube-stream (na een paar uur pauze) of netwerkfout: opnieuw ophalen
+    // en verder vanaf dezelfde plek.
+    _subs.add(player.stream.error.listen((_) => _recover()));
+    // App naar de achtergrond, scherm uit of afgesloten: positie bewaren.
+    _lifecycle = AppLifecycleListener(
+      onInactive: _saveCurrentPosition,
+      onHide: _saveCurrentPosition,
+      onPause: _saveCurrentPosition,
+      onDetach: _saveCurrentPosition,
+    );
     _subs.add(player.stream.completed.listen((done) async {
       final item = current;
       if (!done || item == null) return;
       await storage.clearPosition(item.id);
+      await storage.setLastPlayed(null);
       if (!finished.contains(item.id)) {
         await storage.setFinished(item.id, true);
         finished = storage.finished();
@@ -246,9 +364,45 @@ class AppState extends ChangeNotifier {
       }
       rethrow;
     }
-    final start = storage.position(item.id);
+    await storage.setLastPlayed(item);
+    await _open(uri, storage.position(item.id));
+  }
+
+  /// Opent [uri] en zorgt dat hij echt op [start] begint, ook bij streams waar
+  /// de startoptie genegeerd wordt.
+  Future<void> _open(String uri, Duration? start) async {
+    _resumeTarget = start;
     await player.open(Media(uri, start: start));
     await player.setRate(rate);
+    if (start == null || start <= const Duration(seconds: 5)) return;
+    try {
+      await player.stream.duration
+          .firstWhere((d) => d > Duration.zero)
+          .timeout(const Duration(seconds: 20));
+      if (player.state.position < start - const Duration(seconds: 3)) await player.seek(start);
+    } on TimeoutException {
+      // Geen duur bekend (livestream?): dan maar vanaf het begin.
+      _resumeTarget = null;
+    }
+  }
+
+  /// Na een afspeelfout bij een YouTube-item: stream opnieuw ophalen en
+  /// verder vanaf de laatst bekende positie (één keer per fout).
+  Future<void> _recover() async {
+    final item = current;
+    final p = _player;
+    if (item == null || p == null || item.youtubeId == null || _recovering) return;
+    _recovering = true;
+    try {
+      final pos = p.state.position > Duration.zero ? p.state.position : storage.position(item.id);
+      youtube.invalidate(item.youtubeId!);
+      final url = await youtube.streamUrl(item.youtubeId!, audioOnly: item.kind == MediaKind.audio);
+      if (identical(current, item)) await _open(url.toString(), pos);
+    } catch (_) {
+      // Lukt het niet, dan blijft de foutstatus staan; de gebruiker kan opnieuw tikken.
+    } finally {
+      _recovering = false;
+    }
   }
 
   Future<void> setRate(double value) async {
@@ -268,6 +422,7 @@ class AppState extends ChangeNotifier {
   Future<void> stop() async {
     await _saveCurrentPosition();
     await _player?.stop();
+    await storage.setLastPlayed(null);
     current = null;
     notifyListeners();
   }
@@ -277,11 +432,15 @@ class AppState extends ChangeNotifier {
     final p = _player;
     if (item == null || p == null) return;
     final pos = p.state.position;
+    // Tijdens het laden/doorspoelen naar de bewaarde plek niet overschrijven.
+    final target = _resumeTarget;
+    if (target != null && pos < target - const Duration(seconds: 3)) return;
     if (pos > const Duration(seconds: 5)) await storage.savePosition(item.id, pos);
   }
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
     for (final s in _subs) {
       s.cancel();
     }

@@ -19,6 +19,7 @@ Future<void> playViaYouTube(BuildContext context, MediaItem item, {String? reaso
   final state = AppScope.read(context);
   // Niet twee dingen tegelijk laten spelen.
   if (state.current != null) await state.player.pause();
+  await state.storage.setLastPlayed(item);
   if (!context.mounted) return;
   if (canEmbedYouTube) {
     await Navigator.of(context).push(MaterialPageRoute(
@@ -42,6 +43,7 @@ class _YouTubeEmbedScreenState extends State<YouTubeEmbedScreen> {
   late final YoutubePlayerController _controller;
   late final AppState _state;
   Timer? _saveTimer;
+  AppLifecycleListener? _lifecycle;
 
   @override
   void initState() {
@@ -60,6 +62,12 @@ class _YouTubeEmbedScreenState extends State<YouTubeEmbedScreen> {
     );
     // Afspeelpositie bewaren, net als bij de gewone speler.
     _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) => _savePosition());
+    // Scherm uit / app naar achtergrond: YouTube pauzeert dan; meteen de plek bewaren.
+    _lifecycle = AppLifecycleListener(
+      onInactive: _savePosition,
+      onHide: _savePosition,
+      onPause: _savePosition,
+    );
   }
 
   Future<void> _savePosition() async {
@@ -81,6 +89,7 @@ class _YouTubeEmbedScreenState extends State<YouTubeEmbedScreen> {
   @override
   void dispose() {
     _saveTimer?.cancel();
+    _lifecycle?.dispose();
     _savePosition().whenComplete(_controller.close);
     super.dispose();
   }
@@ -119,7 +128,9 @@ class _YouTubeEmbedScreenState extends State<YouTubeEmbedScreen> {
                     child: Text(
                       '${widget.reason ?? 'Alleen de audio ophalen lukte niet.'} '
                       'Deze video speelt daarom via de officiële YouTube-speler: '
-                      'met beeld (meer data) en alleen zolang dit scherm open is.',
+                      'met beeld (meer data) en alleen zolang dit scherm open is; '
+                      'YouTube staat afspelen op het vergrendelscherm hier niet toe. '
+                      'Je plek wordt onthouden.',
                       style: TextStyle(color: theme.colorScheme.onTertiaryContainer),
                     ),
                   ),

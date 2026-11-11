@@ -247,4 +247,69 @@ void main() {
       expect(podcasts.searched.last, feed.title);
     });
   });
+
+  group('alle afleveringen (Nieuw)', () {
+    Future<AppState> withTwoFeeds() async {
+      SharedPreferences.setMockInitialValues({});
+      final client = MockClient((req) async => http.Response(
+          req.url.host == 'a.example'
+              ? '''<rss><channel><title>A</title>
+                  <item><title>A-oud</title><guid>a1</guid><pubDate>Mon, 01 Jan 2024 10:00:00 GMT</pubDate>
+                    <enclosure url="https://a.example/1.mp3" type="audio/mpeg"/></item>
+                  <item><title>A-zonder-datum</title><guid>a2</guid>
+                    <enclosure url="https://a.example/2.mp3" type="audio/mpeg"/></item>
+                </channel></rss>'''
+              : '''<rss><channel><title>B</title>
+                  <item><title>B-nieuw</title><guid>b1</guid><pubDate>Wed, 03 Jan 2024 10:00:00 GMT</pubDate>
+                    <enclosure url="https://b.example/1.mp4" type="video/mp4"/></item>
+                  <item><title>B-midden</title><guid>b2</guid><pubDate>Tue, 02 Jan 2024 10:00:00 GMT</pubDate>
+                    <enclosure url="https://b.example/2.mp3" type="audio/mpeg"/></item>
+                </channel></rss>''',
+          200));
+      final state = AppState(await Storage.open(),
+          rss: RssService(client), youtube: FakeYouTube(), podcasts: FakePodcasts());
+      await state.addFeed('https://a.example/rss');
+      await state.addFeed('https://b.example/rss');
+      return state;
+    }
+
+    test('nieuwste eerst, zonder datum achteraan', () async {
+      final state = await withTwoFeeds();
+      expect(state.allEpisodes().map((e) => e.$1.title),
+          ['B-nieuw', 'B-midden', 'A-oud', 'A-zonder-datum']);
+      expect(state.allEpisodes().first.$2.title, 'B');
+    });
+
+    test('filter op audio/video en verberg beluisterd', () async {
+      final state = await withTwoFeeds();
+      expect(state.allEpisodes(kind: MediaKind.video).map((e) => e.$1.title), ['B-nieuw']);
+      await state.toggleFinished('b2');
+      expect(state.allEpisodes(kind: MediaKind.audio, hideFinished: true).map((e) => e.$1.title),
+          ['A-oud', 'A-zonder-datum']);
+    });
+
+    test('afleveringen worden bewaard en na herstart direct getoond', () async {
+      final state = await withTwoFeeds();
+      final again = AppState(state.storage, rss: state.rss, youtube: FakeYouTube());
+      expect(again.allEpisodes(), hasLength(4));
+    });
+
+    test('refreshAll vernieuwt alles en telt mislukte feeds', () async {
+      final state = await withTwoFeeds();
+      await state.storage.saveFeeds([...state.feeds, const Feed(url: 'https://kapot.nl/rss', title: 'X')]);
+      final again = AppState(state.storage,
+          rss: RssService(MockClient((req) async => req.url.host == 'kapot.nl'
+              ? http.Response('', 500)
+              : http.Response('<rss><channel><title>Z</title></channel></rss>', 200))),
+          youtube: FakeYouTube());
+      expect(await again.refreshAll(), 1);
+      expect(again.refreshingAll, isFalse);
+    });
+
+    test('findEpisode op titel (voor links naar één aflevering)', () async {
+      final state = await withTwoFeeds();
+      expect(state.findEpisode('https://b.example/rss', 'b-midden')!.id, 'b2');
+      expect(state.findEpisode('https://b.example/rss', 'Heel iets anders'), isNull);
+    });
+  });
 }

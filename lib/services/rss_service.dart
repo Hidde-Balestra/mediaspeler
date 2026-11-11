@@ -18,6 +18,9 @@ class RssService {
   final http.Client _client;
   RssService([http.Client? client]) : _client = client ?? http.Client();
 
+  /// Dezelfde HTTP-client, ook voor het herkennen van links (en in tests te vervangen).
+  http.Client get client => _client;
+
   Future<FeedResult> fetch(String url) async {
     final uri = Uri.parse(url.trim());
     final res = await _client.get(uri, headers: {

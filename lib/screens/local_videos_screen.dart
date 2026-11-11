@@ -37,6 +37,7 @@ class LocalVideosScreen extends StatelessWidget {
         actions: const [ThemeMenuButton()],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'fab-local',
         onPressed: () => _pick(context),
         icon: const Icon(Icons.video_file),
         label: const Text("Video's kiezen"),

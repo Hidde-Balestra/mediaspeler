@@ -109,6 +109,30 @@ class Episode {
     this.imageUrl,
   });
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'feedUrl': feedUrl,
+        'title': title,
+        'description': description,
+        'mediaUrl': mediaUrl,
+        'mimeType': mimeType,
+        'published': published?.toIso8601String(),
+        'duration': duration?.inSeconds,
+        'imageUrl': imageUrl,
+      };
+
+  factory Episode.fromJson(Map<String, dynamic> j) => Episode(
+        id: j['id'] as String,
+        feedUrl: j['feedUrl'] as String,
+        title: j['title'] as String? ?? '',
+        description: j['description'] as String?,
+        mediaUrl: j['mediaUrl'] as String,
+        mimeType: j['mimeType'] as String?,
+        published: DateTime.tryParse(j['published'] as String? ?? ''),
+        duration: j['duration'] is int ? Duration(seconds: j['duration'] as int) : null,
+        imageUrl: j['imageUrl'] as String?,
+      );
+
   /// Video-id als dit een YouTube-video is (de stream wordt pas bij afspelen opgehaald).
   String? get youtubeId => youtubeVideoId(mediaUrl);
 
@@ -162,6 +186,27 @@ class MediaItem {
     this.imageUrl,
     this.youtubeId,
   });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'subtitle': subtitle,
+        'uri': uri,
+        'kind': kind.name,
+        'imageUrl': imageUrl,
+        'youtubeId': youtubeId,
+      };
+
+  factory MediaItem.fromJson(Map<String, dynamic> j) => MediaItem(
+        id: j['id'] as String,
+        title: j['title'] as String,
+        subtitle: j['subtitle'] as String?,
+        uri: j['uri'] as String,
+        kind: MediaKind.values.firstWhere((k) => k.name == j['kind'],
+            orElse: () => MediaKind.audio),
+        imageUrl: j['imageUrl'] as String?,
+        youtubeId: j['youtubeId'] as String?,
+      );
 
   /// Met [audioOnly] wordt een video als audio afgespeeld (zonder beeld).
   factory MediaItem.fromEpisode(Episode e, {String? feedTitle, bool audioOnly = false}) =>
