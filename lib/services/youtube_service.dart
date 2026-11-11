@@ -9,7 +9,9 @@ class YouTubeFeedRef {
   final String feedUrl;
   final String? title;
   final String? imageUrl;
-  const YouTubeFeedRef(this.feedUrl, {this.title, this.imageUrl});
+  /// Bijv. `@kanaal`, als die uit de link bekend is (helpt bij het zoeken van de podcastversie).
+  final String? handle;
+  const YouTubeFeedRef(this.feedUrl, {this.title, this.imageUrl, this.handle});
 }
 
 /// Een beschikbare audiostream (voor de keuze van de zuinigste geschikte stream).
@@ -68,19 +70,30 @@ class YouTubeService {
   Future<YouTubeFeedRef> resolveFeed(String input) async {
     final direct = directFeedUrl(input);
     if (direct != null) return YouTubeFeedRef(direct);
+    final key = input.trim().toLowerCase();
+    return _resolved[key] ??= await _resolveViaYouTube(input);
+  }
 
+  final Map<String, YouTubeFeedRef> _resolved = {};
+
+  Future<YouTubeFeedRef> _resolveViaYouTube(String input) async {
     final s = input.trim();
     try {
       final Channel channel;
+      String? handle;
       if (s.startsWith('@')) {
+        handle = s;
         channel = await _client.channels.getByHandle(s);
       } else {
         final seg = Uri.parse(_withScheme(s)).pathSegments;
         if (seg.isNotEmpty && seg.first.startsWith('@')) {
+          handle = seg.first;
           channel = await _client.channels.getByHandle(seg.first);
         } else if (seg.length >= 2 && seg.first == 'user') {
+          handle = seg[1];
           channel = await _client.channels.getByUsername(seg[1]);
         } else if (seg.length >= 2 && seg.first == 'c') {
+          handle = seg[1];
           channel = await _client.channels.getByHandle('@${seg[1]}');
         } else if (youtubeVideoId(_withScheme(s)) != null) {
           throw const YouTubeException(
@@ -93,11 +106,14 @@ class YouTubeService {
         '$feedBase?channel_id=${channel.id.value}',
         title: channel.title,
         imageUrl: channel.logoUrl.isNotEmpty ? channel.logoUrl : null,
+        handle: handle,
       );
     } on YouTubeException {
       rethrow;
     } catch (e) {
-      throw YouTubeException('Kon het YouTube-kanaal niet vinden ($e)');
+      throw YouTubeException(e is FatalFailureException || e is SearchItemSectionException
+          ? 'YouTube-kanaal niet gevonden. Controleer de link of @naam.'
+          : 'Kon het YouTube-kanaal niet vinden ($e)');
     }
   }
 
@@ -106,8 +122,51 @@ class YouTubeService {
   Future<Uri> streamUrl(String videoId, {required bool audioOnly}) async {
     final key = '$videoId:${audioOnly ? 'a' : 'v'}';
     final cached = _cache[key];
-    if (cached != null && DateTime.now().difference(cached.$2) < _cacheFor) return cached.$1;
+    if (cached != null && now().difference(cached.$2) < _cacheFor) return cached.$1;
 
+    // Rustig aan doen: tijdens een blokkade of voor een onspeelbare video
+    // vragen we YouTube niets, maar melden we het direct (de app valt dan terug).
+    final until = _blockedUntil;
+    if (until != null && now().isBefore(until)) throw const YouTubeBlockedException();
+    if (_unplayable.contains(videoId)) {
+      throw const YouTubeException('Deze video kan hier niet worden afgespeeld.');
+    }
+
+    Uri url;
+    try {
+      url = await fetchStream(videoId, audioOnly: audioOnly);
+    } on YouTubeBlockedException {
+      // Eén keer opnieuw na een korte pauze; daarna een tijd met rust laten.
+      await sleep(retryDelay);
+      try {
+        url = await fetchStream(videoId, audioOnly: audioOnly);
+      } on YouTubeBlockedException {
+        _blockedUntil = now().add(cooldown);
+        rethrow;
+      }
+    } on YouTubeException {
+      _unplayable.add(videoId);
+      rethrow;
+    }
+    _blockedUntil = null;
+    _cache[key] = (url, now());
+    return url;
+  }
+
+  static const retryDelay = Duration(seconds: 4);
+  static const cooldown = Duration(minutes: 15);
+  DateTime? _blockedUntil;
+  final Set<String> _unplayable = {};
+
+  /// Of YouTube ons op dit moment blokkeert (dan meteen de officiële speler gebruiken).
+  bool get isBlocked => _blockedUntil != null && now().isBefore(_blockedUntil!);
+
+  /// Overschrijfbaar in tests.
+  DateTime now() => DateTime.now();
+  Future<void> sleep(Duration d) => Future.delayed(d);
+
+  /// Haalt de stream-URL op bij YouTube (één poging, zonder cache).
+  Future<Uri> fetchStream(String videoId, {required bool audioOnly}) async {
     final StreamManifest manifest;
     try {
       manifest = await _client.videos.streamsClient.getManifest(
@@ -115,30 +174,25 @@ class YouTubeService {
         ytClients: [YoutubeApiClient.ios, YoutubeApiClient.androidVr],
         requireWatchPage: false,
       );
+    } on VideoUnavailableException {
+      // Komt ook voor bij recente video's die wel bestaan; de officiële speler kan ze vaak wel.
+      throw const YouTubeException('YouTube geeft deze video niet vrij als losse stream.');
     } on VideoUnplayableException catch (e) {
-      final msg = e.message.contains('not a bot')
-          ? 'YouTube blokkeert het ophalen tijdelijk (bot-controle). Probeer het later opnieuw.'
-          : 'Deze video kan hier niet worden afgespeeld.';
-      throw YouTubeException(msg);
+      if (e.message.contains('not a bot')) throw const YouTubeBlockedException();
+      throw const YouTubeException('Deze video kan hier niet worden afgespeeld.');
     } catch (e) {
       throw YouTubeException('Kon de YouTube-stream niet ophalen ($e)');
     }
 
-    final Uri url;
     if (audioOnly) {
       final pick = pickAudio([
         for (final a in manifest.audioOnly) AudioOption(a.url, a.bitrate.bitsPerSecond),
       ]);
       if (pick == null) throw const YouTubeException('Geen audiostream gevonden voor deze video.');
-      url = pick.url;
-    } else if (manifest.muxed.isNotEmpty) {
-      url = manifest.muxed.withHighestBitrate().url;
-    } else {
-      throw const YouTubeException(
-          'Geen videostream gevonden. Zet "Alleen audio" aan of open de video in YouTube.');
+      return pick.url;
     }
-    _cache[key] = (url, DateTime.now());
-    return url;
+    if (manifest.muxed.isNotEmpty) return manifest.muxed.withHighestBitrate().url;
+    throw const YouTubeException('Geen videostream gevonden voor deze video.');
   }
 
   /// Kiest de beste audiostream tot [maxAudioBitrate]; anders de zuinigste.
@@ -159,4 +213,10 @@ class YouTubeException implements Exception {
   const YouTubeException(this.message);
   @override
   String toString() => message;
+}
+
+/// YouTube weigert het ophalen ("bevestig dat je geen bot bent").
+class YouTubeBlockedException extends YouTubeException {
+  const YouTubeBlockedException()
+      : super('YouTube blokkeert het ophalen van alleen de audio tijdelijk.');
 }

@@ -3,6 +3,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
 import '../services/app_state.dart';
+import '../services/podcast_directory.dart';
+import '../services/youtube_service.dart';
+import '../widgets/podcast_match.dart';
+import 'youtube_embed_screen.dart';
 import '../widgets/common.dart';
 import 'player_screen.dart';
 
@@ -31,6 +35,65 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       await AppScope.read(context).refreshFeed(widget.feed);
     } catch (e) {
       if (mounted) setState(() => _error = 'Kon feed niet laden: $e');
+    }
+  }
+
+  Future<void> _findPodcast(Feed feed) async {
+    final state = AppScope.read(context);
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('Zoeken naar een podcastversie…')));
+    final PodcastMatch? match;
+    try {
+      match = await state.findPodcastVersionFor(feed);
+    } catch (_) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Zoeken mislukt; controleer je verbinding.')));
+      return;
+    }
+    messenger.hideCurrentSnackBar();
+    if (!mounted) return;
+    if (match == null) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('Geen podcastversie van dit kanaal gevonden (of je volgt hem al).')));
+      return;
+    }
+    final found = match;
+    var replace = true;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setDialog) => AlertDialog(
+          title: const Text('Als podcast volgen?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              PodcastMatchCard(match: found),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: replace,
+                onChanged: (v) => setDialog(() => replace = v ?? true),
+                title: const Text('YouTube-kanaal daarna verwijderen'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Annuleren')),
+            FilledButton(
+                onPressed: () => Navigator.pop(c, true), child: const Text('Podcast toevoegen')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      final added = await state.addFeed(found.feedUrl);
+      if (replace) await state.removeFeed(feed);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => FeedDetailScreen(feed: added)));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Toevoegen mislukt: $e')));
     }
   }
 
@@ -67,6 +130,12 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       appBar: AppBar(
         title: Text(feed.title, maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          if (feed.isYouTube)
+            IconButton(
+              tooltip: 'Podcastversie zoeken',
+              icon: const Icon(Icons.podcasts),
+              onPressed: () => _findPodcast(feed),
+            ),
           if (feed.isYouTube)
             IconButton(
               tooltip: feed.audioOnly
@@ -203,6 +272,10 @@ class _EpisodeTile extends StatelessWidget {
     final item = _item(audioOnly: audioOnly);
     try {
       await state.play(item);
+    } on YouTubeException catch (e) {
+      // Alleen audio lukt niet (bijv. bot-controle): via de officiële YouTube-speler.
+      if (context.mounted) await playViaYouTube(context, item, reason: '${e.message}.');
+      return;
     } catch (e) {
       messenger
         ..hideCurrentSnackBar()

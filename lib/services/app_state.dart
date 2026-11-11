@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../models.dart';
 import 'rss_service.dart';
 import 'storage.dart';
+import 'podcast_directory.dart';
 import 'youtube_service.dart';
 
 /// Centrale app-status: abonnementen, lokale video's en de speler.
@@ -15,10 +16,13 @@ class AppState extends ChangeNotifier {
   final Storage storage;
   final RssService rss;
   final YouTubeService youtube;
+  final PodcastDirectory podcasts;
 
-  AppState(this.storage, {RssService? rss, YouTubeService? youtube})
+  AppState(this.storage,
+      {RssService? rss, YouTubeService? youtube, PodcastDirectory? podcasts})
       : rss = rss ?? RssService(),
-        youtube = youtube ?? YouTubeService() {
+        youtube = youtube ?? YouTubeService(),
+        podcasts = podcasts ?? PodcastDirectory() {
     feeds = storage.loadFeeds();
     localVideos = storage.loadLocalVideos();
     finished = storage.finished();
@@ -95,6 +99,25 @@ class AppState extends ChangeNotifier {
     await storage.saveFeeds(feeds);
     notifyListeners();
   }
+
+  /// Zoekt de gewone podcastversie van een YouTube-kanaal (link, `@handle` of
+  /// kanaalnaam). Null als er geen goede match is of je hem al volgt.
+  Future<PodcastMatch?> findPodcastVersion(String youtubeInput) async {
+    try {
+      final ref = await youtube.resolveFeed(youtubeInput);
+      final title = ref.title ?? (await rss.fetch(ref.feedUrl)).feed.title;
+      return _unlessSubscribed(await podcasts.findFor(title, handle: ref.handle));
+    } catch (_) {
+      return null; // Niet gevonden is geen fout: dan gewoon via YouTube.
+    }
+  }
+
+  /// Zelfde, voor een YouTube-kanaal dat al in je lijst staat.
+  Future<PodcastMatch?> findPodcastVersionFor(Feed feed) async =>
+      _unlessSubscribed(await podcasts.findFor(feed.title));
+
+  PodcastMatch? _unlessSubscribed(PodcastMatch? m) =>
+      m == null || feeds.any((f) => f.url == m.feedUrl) ? null : m;
 
   Feed? feedByUrl(String url) {
     for (final f in feeds) {

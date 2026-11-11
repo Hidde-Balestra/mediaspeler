@@ -4,15 +4,19 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mediaspeler/main.dart';
 import 'package:mediaspeler/services/app_state.dart';
+import 'package:mediaspeler/services/podcast_directory.dart';
 import 'package:mediaspeler/services/rss_service.dart';
 import 'package:mediaspeler/services/storage.dart';
 import 'package:mediaspeler/widgets/common.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-Future<AppState> _state([Map<String, Object> prefs = const {}]) async {
+import 'fakes.dart';
+
+Future<AppState> _state([Map<String, Object> prefs = const {}, FakePodcasts? podcasts]) async {
   SharedPreferences.setMockInitialValues(prefs);
   final client = MockClient((_) async => http.Response('', 500));
-  return AppState(await Storage.open(), rss: RssService(client));
+  return AppState(await Storage.open(),
+      rss: RssService(client), youtube: FakeYouTube(), podcasts: podcasts ?? FakePodcasts());
 }
 
 Brightness _brightness(WidgetTester tester) =>
@@ -97,5 +101,34 @@ void main() {
     await tester.pump();
     expect(find.text('Afspelen als podcast'), findsOneWidget);
     expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value, isTrue);
+  });
+
+  testWidgets('YouTube-kanaal met podcastversie: voorstel en als podcast toevoegen',
+      (tester) async {
+    final podcasts = FakePodcasts(const PodcastMatch(
+        title: 'Kanaal Podcast', author: 'Kanaal', feedUrl: 'https://pod.example/feed'));
+    // Elke feed "bestaat" in deze test.
+    SharedPreferences.setMockInitialValues({});
+    final state = AppState(await Storage.open(),
+        rss: RssService(MockClient((_) async => http.Response(
+            '<rss><channel><title>Kanaal Podcast</title></channel></rss>', 200))),
+        youtube: FakeYouTube(),
+        podcasts: podcasts);
+    await tester.pumpWidget(MediaspelerApp(state: state));
+
+    await tester.tap(find.text('Feed toevoegen'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '@kanaal');
+    await tester.tap(find.text('Toevoegen'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Podcastversie gevonden'), findsOneWidget);
+    expect(find.text('Toch via YouTube'), findsOneWidget);
+    await tester.tap(find.text('Als podcast toevoegen'));
+    await tester.pumpAndSettle();
+
+    expect(state.feeds.single.url, 'https://pod.example/feed');
+    expect(state.feeds.single.isYouTube, isFalse);
+    expect(find.text('Kanaal Podcast'), findsOneWidget, reason: 'staat in de lijst');
   });
 }

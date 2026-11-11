@@ -135,4 +135,77 @@ void main() {
     // Oude opgeslagen feeds zonder het veld.
     expect(Feed.fromJson({'url': 'u', 'title': 't'}).audioOnly, isFalse);
   });
+
+  group('rustig aan bij blokkades', () {
+    test('één nieuwe poging na een pauze, daarna lukt het', () async {
+      final yt = _ScriptedYouTube([const YouTubeBlockedException(), Uri.parse('https://s/ok')]);
+      final url = await yt.streamUrl('dQw4w9WgXcQ', audioOnly: true);
+      expect(url.toString(), 'https://s/ok');
+      expect(yt.calls, 2);
+      expect(yt.slept, [YouTubeService.retryDelay]);
+      expect(yt.isBlocked, isFalse);
+    });
+
+    test('twee keer geblokkeerd: afkoelperiode zonder nieuwe verzoeken', () async {
+      final yt = _ScriptedYouTube([
+        const YouTubeBlockedException(),
+        const YouTubeBlockedException(),
+        Uri.parse('https://s/later'),
+      ]);
+      await expectLater(
+          yt.streamUrl('dQw4w9WgXcQ', audioOnly: true), throwsA(isA<YouTubeBlockedException>()));
+      expect(yt.isBlocked, isTrue);
+
+      // Andere video tijdens de afkoelperiode: direct een melding, geen verzoek.
+      await expectLater(
+          yt.streamUrl('jNQXAC9IVRw', audioOnly: true), throwsA(isA<YouTubeBlockedException>()));
+      expect(yt.calls, 2);
+
+      // Na de afkoelperiode wordt het weer geprobeerd.
+      yt.clock = yt.clock.add(YouTubeService.cooldown + const Duration(seconds: 1));
+      expect((await yt.streamUrl('jNQXAC9IVRw', audioOnly: true)).toString(), 'https://s/later');
+      expect(yt.isBlocked, isFalse);
+    });
+
+    test('onspeelbare video wordt onthouden, andere video\'s gaan gewoon door', () async {
+      final yt = _ScriptedYouTube([
+        const YouTubeException('niet af te spelen'),
+        Uri.parse('https://s/ander'),
+      ]);
+      await expectLater(yt.streamUrl('dQw4w9WgXcQ', audioOnly: true), throwsA(isA<YouTubeException>()));
+      await expectLater(yt.streamUrl('dQw4w9WgXcQ', audioOnly: true), throwsA(isA<YouTubeException>()));
+      expect(yt.calls, 1, reason: 'tweede keer niet opnieuw gevraagd');
+      expect(yt.isBlocked, isFalse);
+      expect((await yt.streamUrl('jNQXAC9IVRw', audioOnly: true)).toString(), 'https://s/ander');
+    });
+
+    test('gelukte stream wordt hergebruikt', () async {
+      final yt = _ScriptedYouTube([Uri.parse('https://s/1')]);
+      await yt.streamUrl('dQw4w9WgXcQ', audioOnly: true);
+      await yt.streamUrl('dQw4w9WgXcQ', audioOnly: true);
+      expect(yt.calls, 1);
+    });
+  });
+}
+
+/// YouTubeService met vooraf bepaalde antwoorden, een eigen klok en zonder echte pauzes.
+class _ScriptedYouTube extends YouTubeService {
+  final List<Object> script;
+  int calls = 0;
+  final List<Duration> slept = [];
+  DateTime clock = DateTime(2026, 1, 1, 12);
+  _ScriptedYouTube(this.script);
+
+  @override
+  DateTime now() => clock;
+
+  @override
+  Future<void> sleep(Duration d) async => slept.add(d);
+
+  @override
+  Future<Uri> fetchStream(String videoId, {required bool audioOnly}) async {
+    final next = script[calls++];
+    if (next is Exception) throw next;
+    return next as Uri;
+  }
 }

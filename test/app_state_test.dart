@@ -5,9 +5,13 @@ import 'package:http/testing.dart';
 import 'package:mediaspeler/models.dart';
 import 'package:mediaspeler/services/app_state.dart';
 import 'package:mediaspeler/services/rss_service.dart';
+import 'package:mediaspeler/services/podcast_directory.dart';
 import 'package:mediaspeler/services/storage.dart';
 import 'package:mediaspeler/services/youtube_service.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'fakes.dart';
 
 const _feedXml = '''<?xml version="1.0"?>
 <rss version="2.0"><channel>
@@ -18,43 +22,22 @@ const _feedXml = '''<?xml version="1.0"?>
   </item>
 </channel></rss>''';
 
-/// Nep-YouTube: geen netwerk, wel bijhouden wat er gevraagd wordt.
-class FakeYouTube extends YouTubeService {
-  final List<String> resolved = [];
-  final List<(String, bool)> streams = [];
-  Object? streamError;
-
-  @override
-  Future<YouTubeFeedRef> resolveFeed(String input) async {
-    resolved.add(input);
-    return const YouTubeFeedRef(
-        'https://www.youtube.com/feeds/videos.xml?channel_id=UCtest',
-        title: 'Kanaal',
-        imageUrl: 'https://yt3.example/logo.jpg');
-  }
-
-  @override
-  Future<Uri> streamUrl(String videoId, {required bool audioOnly}) async {
-    streams.add((videoId, audioOnly));
-    if (streamError != null) throw streamError!;
-    return Uri.parse('https://stream.example/$videoId');
-  }
-}
-
 void main() {
   late List<Uri> requested;
   late FakeYouTube youtube;
+  late FakePodcasts podcasts;
 
   Future<AppState> makeState({Map<String, Object> prefs = const {}}) async {
     SharedPreferences.setMockInitialValues(prefs);
     requested = [];
     youtube = FakeYouTube();
+    podcasts = FakePodcasts();
     final client = MockClient((req) async {
       requested.add(req.url);
       if (req.url.host == 'kapot.nl') return http.Response('weg', 404);
       return http.Response(_feedXml, 200);
     });
-    return AppState(await Storage.open(), rss: RssService(client), youtube: youtube);
+    return AppState(await Storage.open(), rss: RssService(client), youtube: youtube, podcasts: podcasts);
   }
 
   group('feeds', () {
@@ -228,6 +211,40 @@ void main() {
       await expectLater(state.play(item), throwsA(isA<YouTubeException>()));
       expect(youtube.streams.single, ('dQw4w9WgXcQ', true), reason: 'audio-only gevraagd');
       expect(state.current, isNull);
+    });
+  });
+
+  group('podcastversie zoeken', () {
+    const match = PodcastMatch(
+        title: 'Kanaal Podcast', author: 'Kanaal', feedUrl: 'https://pod.example/feed');
+
+    test('zoekt op de kanaalnaam', () async {
+      final state = await makeState();
+      podcasts.match = match;
+      final found = await state.findPodcastVersion('@kanaal');
+      expect(podcasts.searched, ['Kanaal']);
+      expect(found!.feedUrl, 'https://pod.example/feed');
+    });
+
+    test('geen resultaat als je de podcast al volgt', () async {
+      final state = await makeState();
+      podcasts.match = match;
+      await state.addFeed('https://pod.example/feed');
+      expect(await state.findPodcastVersion('@kanaal'), isNull);
+    });
+
+    test('fout bij zoeken betekent gewoon: niet gevonden', () async {
+      final state = await makeState();
+      youtube.resolveError = Exception('netwerk weg');
+      expect(await state.findPodcastVersion('@kanaal'), isNull);
+    });
+
+    test('voor een bestaand YouTube-kanaal', () async {
+      final state = await makeState();
+      podcasts.match = match;
+      final feed = await state.addFeed('@kanaal');
+      expect((await state.findPodcastVersionFor(feed))!.title, 'Kanaal Podcast');
+      expect(podcasts.searched.last, feed.title);
     });
   });
 }

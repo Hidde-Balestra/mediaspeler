@@ -9,6 +9,8 @@ Flutter-app voor podcasts en video's via RSS-feeds, en voor video's die op je ei
 - **Verder waar je was**: de afspeelpositie wordt per aflevering/video bewaard; afgespeelde afleveringen krijgen de markering "beluisterd".
 - **Op apparaat**: video's kiezen met de bestandskiezer en ze in een lokale bibliotheek bewaren.
 - **YouTube**: een kanaal (`youtube.com/@naam`, `@naam`, `/channel/UC…`) of playlist toevoegen via hetzelfde invoerveld. Met **Afspelen als podcast** wordt alleen de audio opgehaald (zuinigste stream tot 96 kbit/s, meestal 70–90% minder data dan video). Per kanaal om te zetten via het koptelefoon-icoon; per video kun je ook kiezen voor "Video bekijken" of "Open in YouTube".
+  - **Podcastversie eerst**: kies je "Afspelen als podcast", dan zoekt de app in de openbare podcastgids van Apple of het kanaal ook een gewone podcastfeed heeft (op kanaalnaam én @handle). Gevonden? Dan krijg je die als voorstel: echte audio, werkt op de achtergrond, geen blokkades. Voor kanalen die je al volgt: podcast-icoon in het kanaal.
+  - **Lukt alleen-audio niet** (YouTube's bot-controle), dan probeert de app het één keer opnieuw na een korte pauze en laat YouTube daarna 15 minuten met rust. In die tijd, of als het echt niet lukt, speelt de video via de **officiële YouTube-speler** in de app (met beeld, alleen zolang het scherm open is; op Windows in de browser).
 - **Thema**: licht, donker of systeem volgen; te kiezen via het thema-icoon rechtsboven en bewaard tussen sessies.
 - **Op de achtergrond**: afspelen gaat door als de app op de achtergrond staat of het scherm uit is, met bediening via de melding, het vergrendelscherm en koptelefoonknoppen (Android en iOS, via `audio_service`). Op Windows speelt de app op de achtergrond gewoon door.
 
@@ -74,6 +76,7 @@ lib/
     app_state.dart           centrale status + speler
     media_session.dart       koppeling met de systeem-mediasessie
     youtube_service.dart     YouTube-kanalen → RSS, streams ophalen
+    podcast_directory.dart   podcastversie zoeken (iTunes Search API)
   screens/                   feeds, feed-detail, lokale video's, speler
   widgets/                   mini-speler, cover, opmaakhulpjes
 ```
@@ -82,5 +85,5 @@ lib/
 
 - Op Android wordt een gekozen video bewaard als `content://`-URI. Na een herstart kan de toegang daartoe vervallen; kies de video dan opnieuw.
 - Feeds worden alleen vernieuwd als je een feed opent of op vernieuwen tikt.
-- YouTube: de lijst met video's komt uit YouTube's officiële RSS-feed (de laatste 15 video's per kanaal). Het afspelen gebruikt [youtube_explode_dart](https://pub.dev/packages/youtube_explode_dart) en werkt niet altijd: YouTube kan het ophalen tijdelijk blokkeren ("bot-controle"), vooral bij veel verzoeken of bij recente video's. De app toont dan een melding met de knop "Open in YouTube". Dit gebruik valt buiten de gebruiksvoorwaarden van YouTube; bedoeld voor persoonlijk gebruik.
+- YouTube: de lijst met video's komt uit YouTube's officiële RSS-feed (de laatste 15 video's per kanaal). Het afspelen gebruikt [youtube_explode_dart](https://pub.dev/packages/youtube_explode_dart) en werkt niet altijd: YouTube kan het ophalen tijdelijk blokkeren ("bot-controle"), vooral bij veel verzoeken of bij recente video's. De app valt dan terug op de officiële YouTube-speler. Dit gebruik valt buiten de gebruiksvoorwaarden van YouTube; bedoeld voor persoonlijk gebruik.
 - YouTube-video's met beeld spelen in maximaal 360p (de enige streams met beeld én geluid samen).
