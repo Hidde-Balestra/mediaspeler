@@ -29,7 +29,7 @@ Future<void> _initMediaSession(AppState state) async {
       config: const AudioServiceConfig(
         androidNotificationChannelId: 'nl.hiddebalestra.mediaspeler.playback',
         androidNotificationChannelName: 'Afspelen',
-        androidNotificationIcon: 'mipmap/ic_launcher',
+        androidNotificationIcon: 'drawable/ic_launcher_monochrome',
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: true,
         rewindInterval: rewindInterval,

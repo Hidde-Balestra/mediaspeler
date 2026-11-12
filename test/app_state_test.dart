@@ -312,4 +312,15 @@ void main() {
       expect(state.findEpisode('https://b.example/rss', 'Heel iets anders'), isNull);
     });
   });
+
+  test('feed verwijderd tijdens vernieuwen: afleveringen niet alsnog bewaard', () async {
+    final state = await makeState();
+    final feed = await state.addFeed('https://example.com/rss');
+    final refreshing = state.refreshFeed(feed);
+    await state.removeFeed(feed);
+    await refreshing;
+    expect(state.episodesFor(feed.url), isNull);
+    expect(state.storage.loadEpisodes(feed.url), isEmpty);
+    expect(state.isLoading(feed.url), isFalse);
+  });
 }

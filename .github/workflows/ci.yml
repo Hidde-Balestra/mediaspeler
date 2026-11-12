@@ -26,3 +26,9 @@ jobs:
         with:
           name: coverage
           path: coverage/lcov.info
+
+      - name: Dekking controleren (minimaal 80%)
+        run: |
+          awk -F: '/^LF:/{lf+=$2} /^LH:/{lh+=$2} END{
+            pct = 100*lh/lf; printf "Testdekking: %.1f%% (%d/%d regels)\n", pct, lh, lf;
+            if (pct < 80) { print "::error::Testdekking onder 80%"; exit 1 } }' coverage/lcov.info

@@ -31,7 +31,9 @@ class PlayerScreen extends StatelessWidget {
                 aspectRatio: 16 / 9,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Video(controller: state.videoController),
+                  child: state.videoController != null
+                      ? Video(controller: state.videoController!)
+                      : const SizedBox.shrink(),
                 ),
               )
             else

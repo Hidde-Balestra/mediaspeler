@@ -80,6 +80,7 @@ jobs:
             --build-name="${VERSION%%-*}" \
             --build-number="${{ github.run_number }}"
           mkdir -p dist
+          bash scripts/check_r8_kept.sh
           cp build/app/outputs/flutter-apk/app-release.apk "dist/mediaspeler-${TAG}.apk"
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
 

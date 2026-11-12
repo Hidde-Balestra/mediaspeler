@@ -2,12 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart' show ThemeMode;
 import 'package:flutter/widgets.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
+
+import 'package:media_kit_video/media_kit_video.dart' show VideoController;
 
 import '../models.dart';
 import 'rss_service.dart';
 import 'storage.dart';
+import 'media_engine.dart';
 import 'podcast_directory.dart';
 import 'source_resolver.dart';
 import 'youtube_service.dart';
@@ -21,16 +22,19 @@ class AppState extends ChangeNotifier {
   late final SourceResolver sources =
       _sources ?? SourceResolver(client: rss.client, directory: podcasts);
   final SourceResolver? _sources;
+  final MediaEngine Function() _engineFactory;
 
   AppState(this.storage,
       {RssService? rss,
       YouTubeService? youtube,
       PodcastDirectory? podcasts,
-      SourceResolver? sources})
+      SourceResolver? sources,
+      MediaEngine Function()? engine})
       : rss = rss ?? RssService(),
         youtube = youtube ?? YouTubeService(),
         podcasts = podcasts ?? PodcastDirectory(),
-        _sources = sources {
+        _sources = sources,
+        _engineFactory = engine ?? MediaKitEngine.new {
     feeds = storage.loadFeeds();
     for (final f in feeds) {
       final cached = storage.loadEpisodes(f.url);
@@ -221,6 +225,8 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     try {
       final result = await rss.fetch(feed.url);
+      // Feed intussen verwijderd: niets meer bewaren.
+      if (feedByUrl(feed.url) == null) return;
       _episodes[feed.url] = result.episodes;
       await storage.saveEpisodes(feed.url, result.episodes);
       feeds = [
@@ -270,9 +276,10 @@ class AppState extends ChangeNotifier {
 
   // De speler wordt pas aangemaakt bij eerste gebruik, zodat de rest van de
   // app-status ook zonder native media-bibliotheken werkt (bijv. in tests).
-  Player? _player;
-  Player get player => _player ??= _createPlayer();
-  late final VideoController videoController = VideoController(player);
+  MediaEngine? _player;
+  MediaEngine get player => _player ??= _createPlayer();
+  /// Videobeeld (alleen bij de echte speler).
+  late final VideoController? videoController = player.createVideoController();
   MediaItem? current;
   double rate = 1.0;
 
@@ -284,6 +291,11 @@ class AppState extends ChangeNotifier {
   /// opslaan (anders overschrijft de 0:00 van het laden je bewaarde plek).
   Duration? _resumeTarget;
   bool _recovering = false;
+  final Map<String, int> _recoveries = {};
+
+  /// Hoe lang de positie stil moet staan na een fout voordat we de stream vervangen.
+  Duration recoverCheckDelay = const Duration(seconds: 3);
+  static const maxRecoveries = 3;
 
   /// Laatst gespeelde item, voor "Verder luisteren" na het herstarten van de app.
   MediaItem? get lastPlayed => current == null ? storage.lastPlayed() : null;
@@ -293,8 +305,8 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Player _createPlayer() {
-    final player = Player();
+  MediaEngine _createPlayer() {
+    final player = _engineFactory();
     _subs.add(player.stream.position.listen((pos) {
       final item = current;
       if (item == null) return;
@@ -304,9 +316,10 @@ class AppState extends ChangeNotifier {
         _resumeTarget = null;
       }
       // Elke 5 seconden de positie bewaren.
-      if (DateTime.now().difference(_lastSave) > const Duration(seconds: 5)) {
+      if (pos > const Duration(seconds: 5) &&
+          DateTime.now().difference(_lastSave) > const Duration(seconds: 5)) {
         _lastSave = DateTime.now();
-        if (pos > const Duration(seconds: 5)) storage.savePosition(item.id, pos);
+        storage.savePosition(item.id, pos);
       }
     }));
     // Bij pauzeren meteen bewaren (bijv. via het vergrendelscherm of koptelefoon).
@@ -372,13 +385,16 @@ class AppState extends ChangeNotifier {
   /// de startoptie genegeerd wordt.
   Future<void> _open(String uri, Duration? start) async {
     _resumeTarget = start;
-    await player.open(Media(uri, start: start));
+    await player.open(uri, start: start);
     await player.setRate(rate);
     if (start == null || start <= const Duration(seconds: 5)) return;
     try {
-      await player.stream.duration
+      // De duur kan al binnen zijn vóór we luisteren (het event wordt niet herhaald).
+      if (player.state.duration <= Duration.zero) {
+        await player.stream.duration
           .firstWhere((d) => d > Duration.zero)
           .timeout(const Duration(seconds: 20));
+      }
       if (player.state.position < start - const Duration(seconds: 3)) await player.seek(start);
     } on TimeoutException {
       // Geen duur bekend (livestream?): dan maar vanaf het begin.
@@ -386,14 +402,25 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Na een afspeelfout bij een YouTube-item: stream opnieuw ophalen en
-  /// verder vanaf de laatst bekende positie (één keer per fout).
+  /// Na een afspeelfout bij een YouTube-item (bijv. een verlopen stream):
+  /// nieuwe stream ophalen en verder vanaf de laatst bekende positie.
   Future<void> _recover() async {
     final item = current;
     final p = _player;
     if (item == null || p == null || item.youtubeId == null || _recovering) return;
+    // Niet eindeloos opnieuw proberen (dat lokt juist YouTube's bot-controle uit).
+    if ((_recoveries[item.id] ?? 0) >= maxRecoveries) return;
     _recovering = true;
     try {
+      // media_kit meldt ook onschuldige waarschuwingen als fout: alleen ingrijpen
+      // als het afspelen echt stilstaat.
+      final before = p.state.position;
+      await Future<void>.delayed(recoverCheckDelay);
+      if (!identical(current, item)) return;
+      final moved = (p.state.position - before).abs() > const Duration(milliseconds: 500);
+      if (moved && !p.state.completed) return;
+      _recoveries[item.id] = (_recoveries[item.id] ?? 0) + 1;
+
       final pos = p.state.position > Duration.zero ? p.state.position : storage.position(item.id);
       youtube.invalidate(item.youtubeId!);
       final url = await youtube.streamUrl(item.youtubeId!, audioOnly: item.kind == MediaKind.audio);

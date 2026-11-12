@@ -74,7 +74,7 @@ class SourceResolver {
         directory = directory ?? PodcastDirectory(client),
         _rss = RssService(client);
 
-  static const _userAgent = 'Mozilla/5.0 (compatible; Mediaspeler/1.4)';
+  static const _userAgent = 'Mozilla/5.0 (compatible; Mediaspeler/1.4.1)';
   static const _mediaExt = {
     '.mp3': MediaKind.audio, '.m4a': MediaKind.audio, '.aac': MediaKind.audio,
     '.ogg': MediaKind.audio, '.opus': MediaKind.audio, '.wav': MediaKind.audio,
