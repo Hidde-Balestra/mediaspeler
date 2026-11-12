@@ -76,7 +76,7 @@ class AppState extends ChangeNotifier {
     String? fallbackImage;
     String? fallbackTitle;
     if (YouTubeService.looksLikeYouTube(normalized)) {
-      final ref = await youtube.resolveFeed(normalized);
+      final ref = await _resolveYouTube(normalized);
       normalized = ref.feedUrl;
       fallbackImage = ref.imageUrl;
       fallbackTitle = ref.title;
@@ -121,9 +121,9 @@ class AppState extends ChangeNotifier {
   /// kanaalnaam). Null als er geen goede match is of je hem al volgt.
   Future<PodcastMatch?> findPodcastVersion(String youtubeInput) async {
     try {
-      final ref = await youtube.resolveFeed(youtubeInput);
+      final ref = await _resolveYouTube(youtubeInput);
       final title = ref.title ?? (await rss.fetch(ref.feedUrl)).feed.title;
-      return _unlessSubscribed(await podcasts.findFor(title, handle: ref.handle));
+      return _unlessSubscribed(await _findPodcast(title, handle: ref.handle));
     } catch (_) {
       return null; // Niet gevonden is geen fout: dan gewoon via YouTube.
     }
@@ -131,7 +131,76 @@ class AppState extends ChangeNotifier {
 
   /// Zelfde, voor een YouTube-kanaal dat al in je lijst staat.
   Future<PodcastMatch?> findPodcastVersionFor(Feed feed) async =>
-      _unlessSubscribed(await podcasts.findFor(feed.title));
+      _unlessSubscribed(await _findPodcast(feed.title));
+
+  // ---------------- Cache (1 week houdbaar) ----------------
+
+  /// Hoe lang opzoekresultaten bewaard blijven; daarna worden ze opnieuw opgehaald.
+  static const cacheMaxAge = Duration(days: 7);
+
+  /// YouTube-kanaal → RSS-feed. Bewaard, zodat YouTube niet steeds gevraagd wordt.
+  Future<YouTubeFeedRef> _resolveYouTube(String input) async {
+    final key = 'yt:${input.trim().toLowerCase()}';
+    final hit = storage.cacheGet(key, maxAge: cacheMaxAge);
+    if (hit.found && hit.value is Map) {
+      final m = Map<String, dynamic>.from(hit.value as Map);
+      return YouTubeFeedRef(m['feedUrl'] as String,
+          title: m['title'] as String?,
+          imageUrl: m['imageUrl'] as String?,
+          handle: m['handle'] as String?);
+    }
+    final ref = await youtube.resolveFeed(input);
+    await storage.cachePut(key, {
+      'feedUrl': ref.feedUrl,
+      'title': ref.title,
+      'imageUrl': ref.imageUrl,
+      'handle': ref.handle,
+    });
+    return ref;
+  }
+
+  /// Podcastversie van een kanaal; ook "niets gevonden" wordt een week onthouden.
+  Future<PodcastMatch?> _findPodcast(String title, {String? handle}) async {
+    final key = 'pod:${title.trim().toLowerCase()}|${handle?.toLowerCase() ?? ''}';
+    final hit = storage.cacheGet(key, maxAge: cacheMaxAge);
+    if (hit.found) {
+      if (hit.value is! Map) return null;
+      final m = Map<String, dynamic>.from(hit.value as Map);
+      return PodcastMatch(
+          title: m['title'] as String,
+          author: m['author'] as String,
+          feedUrl: m['feedUrl'] as String,
+          imageUrl: m['imageUrl'] as String?,
+          score: (m['score'] as num?)?.toDouble() ?? 0);
+    }
+    final match = await podcasts.findFor(title, handle: handle);
+    await storage.cachePut(
+        key,
+        match == null
+            ? null
+            : {
+                'title': match.title,
+                'author': match.author,
+                'feedUrl': match.feedUrl,
+                'imageUrl': match.imageUrl,
+                'score': match.score,
+              });
+    return match;
+  }
+
+  /// Wekelijks onderhoud (bij het starten van de app): alle feeds vernieuwen,
+  /// verlopen cache en restjes van verwijderde feeds opruimen.
+  /// Geeft true als het onderhoud gedaan is (false: was nog niet nodig).
+  Future<bool> weeklyMaintenance({DateTime? now, bool force = false}) async {
+    final t = now ?? DateTime.now();
+    final last = storage.lastMaintenance();
+    if (!force && last != null && t.difference(last) < cacheMaxAge) return false;
+    await storage.setLastMaintenance(t);
+    await storage.cachePurge(maxAge: cacheMaxAge, now: t);
+    await storage.pruneEpisodes(feeds.map((f) => f.url).toSet());
+    await refreshAll();
+    return true;
+  }
 
   PodcastMatch? _unlessSubscribed(PodcastMatch? m) =>
       m == null || feeds.any((f) => f.url == m.feedUrl) ? null : m;

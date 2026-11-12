@@ -8,6 +8,8 @@ import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 import '../models.dart';
 import '../services/app_state.dart';
+import '../services/pip.dart';
+import '../widgets/dim_overlay.dart';
 
 /// Of de officiële YouTube-speler in de app kan draaien (webview: Android en iOS).
 bool get canEmbedYouTube => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
@@ -68,6 +70,11 @@ class _YouTubeEmbedScreenState extends State<YouTubeEmbedScreen> {
       onHide: _savePosition,
       onPause: _savePosition,
     );
+    // Verlaat je de app op dit scherm, dan speelt de video verder als klein venster.
+    PipController.instance.setAuto(true);
+    PipController.instance.isSupported().then((ok) {
+      if (mounted) setState(() => _pipSupported = ok);
+    });
   }
 
   Future<void> _savePosition() async {
@@ -88,20 +95,72 @@ class _YouTubeEmbedScreenState extends State<YouTubeEmbedScreen> {
 
   @override
   void dispose() {
+    PipController.instance.setAuto(false);
     _saveTimer?.cancel();
     _lifecycle?.dispose();
     _savePosition().whenComplete(_controller.close);
     super.dispose();
   }
 
+  bool _dimmed = false;
+  bool _pipSupported = false;
+
+  /// Zelfde speler in elke weergave (normaal, gedimd, beeld-in-beeld): niet herladen.
+  final _playerKey = GlobalKey();
+
+  Widget get _player => KeyedSubtree(key: _playerKey, child: YoutubePlayer(controller: _controller));
+
+  Future<void> _enterPip() async {
+    final ok = await PipController.instance.enter();
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Beeld-in-beeld wordt op dit apparaat niet ondersteund.')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: PipController.instance,
+      builder: (context, _) {
+        // Klein venster: alleen de video.
+        if (PipController.instance.inPip) {
+          return ColoredBox(color: Colors.black, child: Center(child: _player));
+        }
+        return Stack(
+          children: [
+            _normal(context),
+            if (_dimmed)
+              Positioned.fill(
+                child: DimOverlay(
+                  title: widget.item.title,
+                  onExit: () => setState(() => _dimmed = false),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _normal(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.item.subtitle ?? 'YouTube',
             maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
+          if (_pipSupported)
+            IconButton(
+              tooltip: 'Beeld-in-beeld',
+              icon: const Icon(Icons.picture_in_picture_alt),
+              onPressed: _enterPip,
+            ),
+          IconButton(
+            tooltip: 'Scherm dimmen',
+            icon: const Icon(Icons.brightness_low),
+            onPressed: () => setState(() => _dimmed = true),
+          ),
           IconButton(
             tooltip: 'Open in YouTube',
             icon: const Icon(Icons.open_in_new),
@@ -127,9 +186,10 @@ class _YouTubeEmbedScreenState extends State<YouTubeEmbedScreen> {
                   Expanded(
                     child: Text(
                       '${widget.reason ?? 'Alleen de audio ophalen lukte niet.'} '
-                      'Deze video speelt daarom via de officiële YouTube-speler: '
-                      'met beeld (meer data) en alleen zolang dit scherm open is; '
-                      'YouTube staat afspelen op het vergrendelscherm hier niet toe. '
+                      'Deze video speelt daarom via de officiële YouTube-speler (met beeld). '
+                      '${_pipSupported ? 'Verlaat je de app, dan speelt hij verder in een klein venster. ' : ''}'
+                      'Wil je alleen luisteren? Dim het scherm (zonnetje rechtsboven): '
+                      'de video loopt door en het scherm gebruikt bijna geen stroom. '
                       'Je plek wordt onthouden.',
                       style: TextStyle(color: theme.colorScheme.onTertiaryContainer),
                     ),
@@ -139,10 +199,7 @@ class _YouTubeEmbedScreenState extends State<YouTubeEmbedScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: YoutubePlayer(controller: _controller),
-          ),
+          ClipRRect(borderRadius: BorderRadius.circular(12), child: _player),
           const SizedBox(height: 16),
           Text(widget.item.title,
               style: theme.textTheme.titleLarge, textAlign: TextAlign.center),

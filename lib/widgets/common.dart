@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/app_state.dart';
+import '../services/image_cache.dart';
 
 /// Knop in de app-balk om te kiezen tussen systeem-, licht en donker thema.
 class ThemeMenuButton extends StatelessWidget {
@@ -68,7 +69,8 @@ class Cover extends StatelessWidget {
       borderRadius: BorderRadius.circular(size * 0.15),
       child: url == null
           ? fallback
-          : Image.network(url!,
+          : Image(
+              image: AppImageCache.provider(url!),
               width: size,
               height: size,
               fit: BoxFit.cover,

@@ -1,3 +1,4 @@
+import 'dart:async' show unawaited;
 import 'dart:io' show Platform;
 
 import 'package:audio_service/audio_service.dart';
@@ -17,6 +18,8 @@ Future<void> main() async {
   final state = AppState(storage);
   await _initMediaSession(state);
   runApp(MediaspelerApp(state: state));
+  // Eens per week: alle feeds vernieuwen en verlopen cache opruimen (op de achtergrond).
+  unawaited(state.weeklyMaintenance().catchError((_) => false));
 }
 
 /// Achtergrond-afspelen en bediening via melding/vergrendelscherm (Android, iOS).

@@ -13,6 +13,8 @@ Flutter-app voor podcasts en video's via RSS-feeds, en voor video's die op je ei
   - **Podcastversie eerst**: kies je "Afspelen als podcast", dan zoekt de app in de openbare podcastgids van Apple of het kanaal ook een gewone podcastfeed heeft (op kanaalnaam én @handle). Gevonden? Dan krijg je die als voorstel: echte audio, werkt op de achtergrond, geen blokkades. Voor kanalen die je al volgt: podcast-icoon in het kanaal.
   - **Lukt alleen-audio niet** (YouTube's bot-controle), dan probeert de app het één keer opnieuw na een korte pauze en laat YouTube daarna 15 minuten met rust. In die tijd, of als het echt niet lukt, speelt de video via de **officiële YouTube-speler** in de app (met beeld, alleen zolang het scherm open is; op Windows in de browser).
 - **Thema**: licht, donker of systeem volgen; te kiezen via het thema-icoon rechtsboven en bewaard tussen sessies.
+- **Cache**: afleveringen, covers (op schijf) en opzoekresultaten (YouTube-kanaal → feed, podcastversie) worden bewaard. Na een week verlopen ze en worden ze opnieuw opgehaald. Eens per week vernieuwt de app bij het starten automatisch alle feeds en ruimt oude gegevens op.
+- **YouTube-speler (terugval)**: knop om het scherm te dimmen (zwart, minimale helderheid, scherm blijft aan zodat de video doorspeelt) en beeld-in-beeld op Android: verlaat je de app, dan speelt de video verder in een klein venster.
 - **Op de achtergrond**: afspelen gaat door als de app op de achtergrond staat of het scherm uit is, met bediening via de melding, het vergrendelscherm en koptelefoonknoppen (Android en iOS, via `audio_service`). Op Windows speelt de app op de achtergrond gewoon door.
 
 ## Platforms
@@ -89,7 +91,7 @@ lib/
 - Feeds worden alleen vernieuwd als je een feed opent of op vernieuwen tikt.
 - YouTube: de lijst met video's komt uit YouTube's officiële RSS-feed (de laatste 15 video's per kanaal). Het afspelen gebruikt [youtube_explode_dart](https://pub.dev/packages/youtube_explode_dart) en werkt niet altijd: YouTube kan het ophalen tijdelijk blokkeren ("bot-controle"), vooral bij veel verzoeken of bij recente video's. De app valt dan terug op de officiële YouTube-speler. Dit gebruik valt buiten de gebruiksvoorwaarden van YouTube; bedoeld voor persoonlijk gebruik.
 - YouTube-video's met beeld spelen in maximaal 360p (de enige streams met beeld én geluid samen).
-- Via de officiële YouTube-speler (de terugval) speelt een video niet door op het vergrendelscherm: dat staat YouTube voor ingesloten spelers niet toe. Alleen-audio via de eigen speler speelt wel door. De plek wordt in beide gevallen onthouden.
+- Via de officiële YouTube-speler (de terugval) stopt de video als het scherm vergrendeld wordt. Gebruik in plaats daarvan "Scherm dimmen" of beeld-in-beeld.
 
 ## App-icoon
 

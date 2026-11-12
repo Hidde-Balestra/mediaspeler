@@ -323,4 +323,82 @@ void main() {
     expect(state.storage.loadEpisodes(feed.url), isEmpty);
     expect(state.isLoading(feed.url), isFalse);
   });
+
+  group('cache (1 week)', () {
+    test('YouTube-kanaal wordt maar één keer opgezocht', () async {
+      final state = await makeState();
+      podcasts.match = null;
+      await state.findPodcastVersion('@kanaal');
+      await state.findPodcastVersion('@Kanaal ');
+      expect(youtube.resolved, ['@kanaal'], reason: 'tweede keer uit de cache');
+      expect(podcasts.searched, ['Kanaal'], reason: '"niets gevonden" ook onthouden');
+    });
+
+    test('cache overleeft een herstart', () async {
+      final state = await makeState();
+      podcasts.match = const PodcastMatch(title: 'P', author: 'A', feedUrl: 'https://p.example/rss');
+      expect((await state.findPodcastVersion('@kanaal'))!.feedUrl, 'https://p.example/rss');
+
+      final yt2 = FakeYouTube(), pods2 = FakePodcasts();
+      final again = AppState(state.storage, rss: state.rss, youtube: yt2, podcasts: pods2);
+      expect((await again.findPodcastVersion('@kanaal'))!.title, 'P');
+      expect(yt2.resolved, isEmpty);
+      expect(pods2.searched, isEmpty);
+    });
+
+    test('na een week verlopen', () async {
+      final s = (await makeState()).storage;
+      final t = DateTime(2026, 1, 1);
+      await s.cachePut('x', 1, now: t);
+      expect(s.cacheGet('x', maxAge: AppState.cacheMaxAge, now: t.add(const Duration(days: 6))).value, 1);
+      expect(s.cacheGet('x', maxAge: AppState.cacheMaxAge, now: t.add(const Duration(days: 8))).found,
+          isFalse);
+      expect(await s.cachePurge(maxAge: AppState.cacheMaxAge, now: t.add(const Duration(days: 8))), 1);
+      expect(s.cacheGet('x', maxAge: const Duration(days: 999)).found, isFalse);
+    });
+
+    test('kapotte cache-waarde telt als "niet in de cache"', () async {
+      final state = await makeState(prefs: {'cache:yt:@kanaal': '{kapot'});
+      await state.findPodcastVersion('@kanaal');
+      expect(youtube.resolved, ['@kanaal']);
+    });
+  });
+
+  group('wekelijks onderhoud', () {
+    test('eerste keer: alles vernieuwen, opruimen en het moment onthouden', () async {
+      final state = await makeState();
+      final feed = await state.addFeed('https://example.com/rss');
+      await state.storage.saveEpisodes('https://weg.example/rss', const []);
+      await state.storage.cachePut('oud', 1, now: DateTime(2020));
+      requested.clear();
+
+      final t = DateTime(2026, 11, 13);
+      expect(await state.weeklyMaintenance(now: t), isTrue);
+      expect(requested.single.toString(), feed.url, reason: 'feeds vernieuwd');
+      expect(state.storage.lastMaintenance(), t);
+      expect(state.storage.cacheGet('oud', maxAge: const Duration(days: 99999)).found, isFalse);
+      expect(state.storage.loadEpisodes(feed.url), isNotEmpty);
+    });
+
+    test('binnen een week niet opnieuw, daarna wel', () async {
+      final state = await makeState();
+      await state.addFeed('https://example.com/rss');
+      final t = DateTime(2026, 11, 13);
+      await state.weeklyMaintenance(now: t);
+      requested.clear();
+      expect(await state.weeklyMaintenance(now: t.add(const Duration(days: 6))), isFalse);
+      expect(requested, isEmpty);
+      expect(await state.weeklyMaintenance(now: t.add(const Duration(days: 7, hours: 1))), isTrue);
+      expect(requested, hasLength(1));
+    });
+
+    test('restjes van verwijderde feeds worden opgeruimd', () async {
+      final state = await makeState();
+      await state.storage.saveEpisodes('https://weg.example/rss', [
+        const Episode(id: 'e', feedUrl: 'https://weg.example/rss', title: 'x', mediaUrl: 'https://weg.example/e.mp3')
+      ]);
+      await state.weeklyMaintenance(force: true);
+      expect(state.storage.loadEpisodes('https://weg.example/rss'), isEmpty);
+    });
+  });
 }
