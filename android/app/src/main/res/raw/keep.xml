@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Het meldingsicoon wordt via zijn naam opgevraagd (audio_service); niet wegsnoeien. -->
 <resources xmlns:tools="http://schemas.android.com/tools"
-    tools:keep="@drawable/ic_launcher_monochrome" />
+    tools:keep="@drawable/ic_launcher_monochrome,@drawable/ic_replay_10,@drawable/ic_forward_10" />

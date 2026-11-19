@@ -60,6 +60,17 @@ void main() {
       expect(s.androidCompactActionIndices, [0, 1, 2]);
     });
 
+    test('vergrendelscherm: 10 s terug en 10 s vooruit met eigen "10"-iconen', () {
+      final s = buildPlaybackState(
+          playing: true, buffering: false, completed: false, position: Duration.zero);
+      expect(s.controls.first.androidIcon, 'drawable/ic_replay_10');
+      expect(s.controls.first.action, svc.MediaAction.rewind);
+      expect(s.controls[2].androidIcon, 'drawable/ic_forward_10');
+      expect(s.controls[2].action, svc.MediaAction.fastForward);
+      expect(rewindInterval, const Duration(seconds: 10));
+      expect(fastForwardInterval, const Duration(seconds: 10));
+    });
+
     test('gepauzeerd: afspeelknop', () {
       final s = buildPlaybackState(
           playing: false, buffering: false, completed: false, position: Duration.zero);
@@ -150,7 +161,7 @@ void main() {
       expect(engine.seeks.last, const Duration(minutes: 4, seconds: 50));
       engine.position = const Duration(minutes: 5);
       await handler.fastForward();
-      expect(engine.seeks.last, const Duration(minutes: 5, seconds: 30));
+      expect(engine.seeks.last, const Duration(minutes: 5, seconds: 10));
       await handler.seek(const Duration(minutes: 20));
       expect(engine.seeks.last, const Duration(minutes: 20));
       expect(handler.playbackState.value.updatePosition, const Duration(minutes: 20));

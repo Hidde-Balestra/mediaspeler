@@ -6,7 +6,21 @@ import '../models.dart';
 import 'app_state.dart';
 
 const rewindInterval = Duration(seconds: 10);
-const fastForwardInterval = Duration(seconds: 30);
+const fastForwardInterval = Duration(seconds: 10);
+
+/// Knoppen op het vergrendelscherm en in de melding, met "10"-iconen
+/// (android/app/src/main/res/drawable-*/ic_replay_10.png, gemaakt door
+/// tool/render_icon_test.dart).
+const rewindControl = svc.MediaControl(
+  androidIcon: 'drawable/ic_replay_10',
+  label: '10 s terug',
+  action: svc.MediaAction.rewind,
+);
+const fastForwardControl = svc.MediaControl(
+  androidIcon: 'drawable/ic_forward_10',
+  label: '10 s vooruit',
+  action: svc.MediaAction.fastForward,
+);
 
 /// Zet de app-[MediaItem] om naar het formaat van audio_service
 /// (titel, kanaal en cover op het vergrendelscherm en in de melding).
@@ -39,9 +53,9 @@ svc.PlaybackState buildPlaybackState({
   }
   return svc.PlaybackState(
     controls: [
-      svc.MediaControl.rewind,
+      rewindControl,
       playing ? svc.MediaControl.pause : svc.MediaControl.play,
-      svc.MediaControl.fastForward,
+      fastForwardControl,
       svc.MediaControl.stop,
     ],
     systemActions: const {

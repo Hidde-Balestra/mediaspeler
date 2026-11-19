@@ -117,9 +117,9 @@ class PlayerControls extends StatelessWidget {
             const SizedBox(width: 12),
             IconButton(
               iconSize: 36,
-              tooltip: '30 s vooruit',
-              onPressed: () => state.skip(const Duration(seconds: 30)),
-              icon: const Icon(Icons.forward_30),
+              tooltip: '10 s vooruit',
+              onPressed: () => state.skip(const Duration(seconds: 10)),
+              icon: const Icon(Icons.forward_10),
             ),
           ],
         ),

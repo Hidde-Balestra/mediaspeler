@@ -2,7 +2,10 @@
 // en daarna: dart run flutter_launcher_icons
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
+
+import 'package:flutter/services.dart' show FontLoader;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -73,6 +76,7 @@ void _background(Canvas c, double s) {
 }
 
 void main() {
+  mediaButtonIcons();
   testWidgets('app-icoon renderen', (tester) async {
     await tester.runAsync(() async {
       // Volledig icoon (iOS, Windows, oudere Android): achtergrond tot de rand.
@@ -89,6 +93,37 @@ void main() {
       await _save('assets/icon/monochrome.png', 1024, (c, s) {
         _symbol(c, Offset(s / 2, s / 2), s * 0.95, cutout: true);
       });
+    });
+  });
+}
+
+/// Knoppen voor het vergrendelscherm/de melding: dezelfde Material-iconen als in
+/// de app (replay_10 / forward_10), wit op transparant, in alle schermdichtheden.
+void mediaButtonIcons() {
+  testWidgets('mediaknoppen renderen', (tester) async {
+    await tester.runAsync(() async {
+      final flutterRoot = Platform.environment['FLUTTER_ROOT']!;
+      final font = File('$flutterRoot/bin/cache/artifacts/material_fonts/materialicons-regular.otf');
+      final loader = FontLoader('MaterialIcons')
+        ..addFont(Future.value(ByteData.sublistView(font.readAsBytesSync())));
+      await loader.load();
+
+      const densities = {'mdpi': 24, 'hdpi': 36, 'xhdpi': 48, 'xxhdpi': 72, 'xxxhdpi': 96};
+      for (final (name, icon) in [('ic_replay_10', Icons.replay_10), ('ic_forward_10', Icons.forward_10)]) {
+        for (final MapEntry(key: dpi, value: px) in densities.entries) {
+          final dir = Directory('android/app/src/main/res/drawable-$dpi')..createSync(recursive: true);
+          await _save('${dir.path}/$name.png', px, (c, s) {
+            final tp = TextPainter(
+              text: TextSpan(
+                text: String.fromCharCode(icon.codePoint),
+                style: TextStyle(fontFamily: 'MaterialIcons', fontSize: s, color: Colors.white),
+              ),
+              textDirection: TextDirection.ltr,
+            )..layout();
+            tp.paint(c, Offset((s - tp.width) / 2, (s - tp.height) / 2));
+          });
+        }
+      }
     });
   });
 }

@@ -155,10 +155,10 @@ void main() {
       expect(find.text('02:00'), findsOneWidget);
       expect(find.text('1:00:00'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('30 s vooruit'));
-      expect(engine.seeks.last, const Duration(minutes: 2, seconds: 30));
+      await tester.tap(find.byTooltip('10 s vooruit'));
+      expect(engine.seeks.last, const Duration(minutes: 2, seconds: 10));
       await tester.tap(find.byTooltip('10 s terug'));
-      expect(engine.seeks.last, const Duration(minutes: 2, seconds: 20));
+      expect(engine.seeks.last, const Duration(minutes: 2));
 
       await tester.ensureVisible(find.text('1.5x'));
       await tester.pumpAndSettle();
